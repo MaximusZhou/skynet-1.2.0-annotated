@@ -75,15 +75,19 @@ _init_env(lua_State *L) {
 	lua_pop(L,1);
 }
 
+// 注册信号注册函数
 int sigign() {
 	struct sigaction sa;
-	sa.sa_handler = SIG_IGN;
+	sa.sa_handler = SIG_IGN;  // 忽略相应的信号
 	sa.sa_flags = 0;
 	sigemptyset(&sa.sa_mask);
-	sigaction(SIGPIPE, &sa, 0);
+	sigaction(SIGPIPE, &sa, 0); // SIGPIPE 在收到RST响应后，还向关闭的链接发送数据，会收到这个信号
 	return 0;
 }
 
+// 加载作为做一个 lua 函数，以配置文件路径作为参数
+// 代码行里的local config_name = ... 就表示把文件路径赋值给变量config_name
+// 此外实现了 include 函数，因此配置文件中可以使用 include "config.path" 类似的代码
 static const char * load_config = "\
 	local result = {}\n\
 	local function getenv(name) return assert(os.getenv(name), [[os.getenv() failed: ]] .. name) end\n\
@@ -126,14 +130,16 @@ main(int argc, char *argv[]) {
 		return 1;
 	}
 
-	luaS_initshr();
-	skynet_globalinit();
-	skynet_env_init();
+	luaS_initshr(); // 初始化 string table 对应的全局静态变量 SSM
+	skynet_globalinit();  // 初始化 skynet 全局 node 对应的全局静态变量G_NODE (skynet_server.c)
+	skynet_env_init(); // 分配 skynet_env 内存，初始化，主要包括一个自选锁和一个lua_State (skynet_env.c)
 
-	sigign();
+	sigign(); // 注册信号处理函数
 
 	struct skynet_config config;
 
+	// { 开始读取配置文件
+	// 服务启动文件例子在examples/config，直接使用了 lua 语法，并且实现了 include 函数
 	struct lua_State *L = luaL_newstate();
 	luaL_openlibs(L);	// link lua lib
 
@@ -159,6 +165,8 @@ main(int argc, char *argv[]) {
 	config.profile = optboolean("profile", 1);
 
 	lua_close(L);
+
+	// } 读取配置文件结束
 
 	skynet_start(&config);
 	skynet_globalexit();

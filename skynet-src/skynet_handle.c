@@ -39,6 +39,8 @@ skynet_handle_register(struct skynet_context *ctx) {
 	
 	for (;;) {
 		int i;
+
+		// 查找空的 slot 然后插入
 		uint32_t handle = s->handle_index;
 		for (i=0;i<s->slot_size;i++,handle++) {
 			if (handle > HANDLE_MASK) {
@@ -56,6 +58,8 @@ skynet_handle_register(struct skynet_context *ctx) {
 				return handle;
 			}
 		}
+
+		// 找不到空的 slot，则分配新的空间
 		assert((s->slot_size*2 - 1) <= HANDLE_MASK);
 		struct skynet_context ** new_slot = skynet_malloc(s->slot_size * 2 * sizeof(struct skynet_context *));
 		memset(new_slot, 0, s->slot_size * 2 * sizeof(struct skynet_context *));
@@ -243,6 +247,7 @@ skynet_handle_namehandle(uint32_t handle, const char *name) {
 	return ret;
 }
 
+// 初始化全局变量 handle_storage *H，一个handle_storage 管理多个 skynet_context
 void 
 skynet_handle_init(int harbor) {
 	assert(H==NULL);

@@ -124,11 +124,14 @@ drop_message(struct skynet_message *msg, void *ud) {
 
 struct skynet_context * 
 skynet_context_new(const char * name, const char *param) {
+
+	// 获取name.so文件对应的模块
 	struct skynet_module * mod = skynet_module_query(name);
 
 	if (mod == NULL)
 		return NULL;
 
+	// 调用name.so模块对应的_create函数，并且其返回值返回赋值给inst
 	void *inst = skynet_module_instance_create(mod);
 	if (inst == NULL)
 		return NULL;
@@ -152,7 +155,7 @@ skynet_context_new(const char * name, const char *param) {
 	ctx->profile = G_NODE.profile;
 	// Should set to 0 first to avoid skynet_handle_retireall get an uninitialized handle
 	ctx->handle = 0;	
-	ctx->handle = skynet_handle_register(ctx);
+	ctx->handle = skynet_handle_register(ctx); // 返回的handle，可以认为是ctx的索引，能快速获得相应的ctx
 	struct message_queue * queue = ctx->queue = skynet_mq_create(ctx->handle);
 	// init function maybe use ctx->handle, so it must init at last
 	context_inc();
@@ -804,11 +807,13 @@ skynet_context_send(struct skynet_context * ctx, void * msg, size_t sz, uint32_t
 	skynet_mq_push(ctx->queue, &smsg);
 }
 
+// 初始化 G_NODE 变量，即skynet 全局 node ，在服务器启动的时候 main 函数调用
 void 
 skynet_globalinit(void) {
 	G_NODE.total = 0;
 	G_NODE.monitor_exit = 0;
 	G_NODE.init = 1;
+	// pthread_key_create 创建的 key 对所有的线程可见，但是对应的值，每个线程都是独立的
 	if (pthread_key_create(&G_NODE.handle_key, NULL)) {
 		fprintf(stderr, "pthread_key_create failed");
 		exit(1);

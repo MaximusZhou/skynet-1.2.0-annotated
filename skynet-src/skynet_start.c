@@ -249,21 +249,37 @@ skynet_start(struct skynet_config * config) {
 	// register SIGHUP for log file reopen
 	struct sigaction sa;
 	sa.sa_handler = &handle_hup;
+	// 设置 SA_RESTART属性, 那么当信号处理函数返回后, 被该信号中断的系统调用将自动恢复
 	sa.sa_flags = SA_RESTART;
+	// 在运行信号SIGHUP的处理函数的时候，屏蔽所有的信号
 	sigfillset(&sa.sa_mask);
 	sigaction(SIGHUP, &sa, NULL);
 
+	// 把进程作为守护进程来运行
 	if (config->daemon) {
 		if (daemon_init(config->daemon)) {
 			exit(1);
 		}
 	}
+
+	// 初始化用来标识 harbor 的全局变量 HARBOR
 	skynet_harbor_init(config->harbor);
+
+	// 初始化管理 skynet_context 的 handle_storage
 	skynet_handle_init(config->harbor);
+
+	// 初始化全局消息队列
 	skynet_mq_init();
+
+	// 初始化管理so模块的结构体
 	skynet_module_init(config->module_path);
+
+	// 初始化定位器相关，包括 skynet 认为的当前时间相关信息
 	skynet_timer_init();
+
+	// 初始化管理socket的结构体，包括epool的fd
 	skynet_socket_init();
+
 	skynet_profile_enable(config->profile);
 
 	struct skynet_context *ctx = skynet_context_new(config->logservice, config->logger);

@@ -277,6 +277,7 @@ struct shrmap {
 
 static struct shrmap SSM;
 
+// 初始化string table，服务器启动的时候main函数调用
 LUA_API void
 luaS_initshr() {
 	struct shrmap * s = &SSM;

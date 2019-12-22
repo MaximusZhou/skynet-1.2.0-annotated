@@ -21,6 +21,7 @@ struct modules {
 
 static struct modules * M = NULL;
 
+// 加载和打开so文件
 static void *
 _try_open(struct modules *m, const char * name) {
 	const char *l;
@@ -86,6 +87,8 @@ get_api(struct skynet_module *mod, const char *api_name) {
 	} else {
 		ptr = ptr + 1;
 	}
+
+	// dlsym 返回符号在内存的地址，这里返回的函数地址
 	return dlsym(mod->module, ptr);
 }
 
@@ -99,6 +102,7 @@ open_sym(struct skynet_module *mod) {
 	return mod->init == NULL;
 }
 
+// 查询so模块文件，如果还没有打开，则打开
 struct skynet_module * 
 skynet_module_query(const char * name) {
 	struct skynet_module * result = _query(name);
@@ -142,6 +146,7 @@ skynet_module_insert(struct skynet_module *mod) {
 	SPIN_UNLOCK(M)
 }
 
+// 调用模块的_create函数
 void * 
 skynet_module_instance_create(struct skynet_module *m) {
 	if (m->create) {
@@ -170,6 +175,7 @@ skynet_module_instance_signal(struct skynet_module *m, void *inst, int signal) {
 	}
 }
 
+// 初始化管理so模块的结构体
 void 
 skynet_module_init(const char *path) {
 	struct modules *m = skynet_malloc(sizeof(*m));
