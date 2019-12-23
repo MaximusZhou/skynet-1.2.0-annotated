@@ -290,6 +290,7 @@ skynet_now(void) {
 	return TI->current;
 }
 
+// 服务器启动的时候调用，初始化定时器管理模块
 void 
 skynet_timer_init(void) {
 	TI = timer_create_timer();

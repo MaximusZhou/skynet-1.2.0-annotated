@@ -21,7 +21,7 @@ struct modules {
 
 static struct modules * M = NULL;
 
-// 加载和打开so文件
+// 加载和打开so文件，时候系统接口 dlopen 打开so文件
 static void *
 _try_open(struct modules *m, const char * name) {
 	const char *l;
@@ -88,10 +88,11 @@ get_api(struct skynet_module *mod, const char *api_name) {
 		ptr = ptr + 1;
 	}
 
-	// dlsym 返回符号在内存的地址，这里返回的函数地址
+	// dlsym 返回的是符号在内存中的地址，这里返回是对应的函数地址
 	return dlsym(mod->module, ptr);
 }
 
+// 从打开的so文件中，获取相应函数（_create等函数地址）地址保存到结构体相应的成员中
 static int
 open_sym(struct skynet_module *mod) {
 	mod->create = get_api(mod, "_create");
@@ -113,6 +114,7 @@ skynet_module_query(const char * name) {
 
 	result = _query(name); // double check
 
+	// 尝试打开和加载相应的 so 文件
 	if (result == NULL && M->count < MAX_MODULE_TYPE) {
 		int index = M->count;
 		void * dl = _try_open(M,name);
@@ -175,7 +177,7 @@ skynet_module_instance_signal(struct skynet_module *m, void *inst, int signal) {
 	}
 }
 
-// 初始化管理so模块的结构体
+// 服务器启动的时候调用，初始化管理so模块的结构体
 void 
 skynet_module_init(const char *path) {
 	struct modules *m = skynet_malloc(sizeof(*m));

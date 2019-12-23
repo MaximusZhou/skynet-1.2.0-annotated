@@ -13,6 +13,7 @@
 
 static struct socket_server * SOCKET_SERVER = NULL;
 
+// 服务器启动时候调用，初始化管理 socket 相关的结构体
 void 
 skynet_socket_init() {
 	SOCKET_SERVER = socket_server_create(skynet_now());

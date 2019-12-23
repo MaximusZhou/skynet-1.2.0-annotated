@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+// 每一个worker线程，对应一个这样的结构体实例
 struct skynet_monitor {
 	int version;
 	int check_version;

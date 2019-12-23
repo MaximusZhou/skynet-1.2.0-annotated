@@ -216,6 +216,7 @@ skynet_mq_init() {
 	Q=q;
 }
 
+// 标记队列release了，不在全局队列，把它放到全局队列中
 void 
 skynet_mq_mark_release(struct message_queue *q) {
 	SPIN_LOCK(q)

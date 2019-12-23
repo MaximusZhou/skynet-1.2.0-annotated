@@ -267,6 +267,7 @@ dump_c_mem() {
 	skynet_error(NULL, "+total: %zdkb",total >> 10);
 }
 
+// 复制 str 对应的字符串内容，到新分配的内存空间中，新的内存空间作为指针返回
 char *
 skynet_strdup(const char *str) {
 	size_t sz = strlen(str);

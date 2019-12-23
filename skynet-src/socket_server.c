@@ -84,15 +84,15 @@ struct socket_stat {
 
 struct socket {
 	uintptr_t opaque;
-	struct wb_list high;
-	struct wb_list low;
+	struct wb_list high; // 用于保存高优先级数据的 write_buffer list
+	struct wb_list low; // 用于保存低优先级数据的 write_buffer list
 	int64_t wb_size;
 	struct socket_stat stat;
 	volatile uint32_t sending;
 	int fd;
 	int id;
 	uint8_t protocol;
-	uint8_t type;
+	uint8_t type; // socket 当前状态类型
 	uint16_t udpconnecting;
 	int64_t warn_size;
 	union {
@@ -106,11 +106,11 @@ struct socket {
 };
 
 struct socket_server {
-	volatile uint64_t time;
-	int recvctrl_fd;
-	int sendctrl_fd;
+	volatile uint64_t time; // 系统当前时间
+	int recvctrl_fd; // 用于接收数据的 fd，即管道的写端
+	int sendctrl_fd; // 用于发送数据的 fd，即管道的写端
 	int checkctrl;
-	poll_fd event_fd;
+	poll_fd event_fd; // epoll 对应的 fd
 	int alloc_id;
 	int event_n;
 	int event_index;
@@ -335,20 +335,29 @@ clear_wb_list(struct wb_list *list) {
 	list->tail = NULL;
 }
 
+// 服务器启动时候会调用，创建管理 socket 相关的结构体 socket_server
 struct socket_server * 
 socket_server_create(uint64_t time) {
 	int i;
 	int fd[2];
+	// 调用系统接口 epoll_create，创建一个 epoll 实例，接口返回一个文件描述符，
+	// 返回的 fd 用于后续系统接口调用
 	poll_fd efd = sp_create();
 	if (sp_invalid(efd)) {
 		fprintf(stderr, "socket-server: create event pool failed.\n");
 		return NULL;
 	}
+
+	// pipe创建一个管道，用于进程间通信，返回两个fd，pipefd[0]用于读，pipefd[1]用于写
+	// 写入到管道数据，在读取之前，都是被 Linux 内核 buffed 的
 	if (pipe(fd)) {
+		// sp_release 只是对 close 简单封装
 		sp_release(efd);
 		fprintf(stderr, "socket-server: create socket pair failed.\n");
 		return NULL;
 	}
+
+	// 监听管道 读端 是否有数据可读
 	if (sp_add(efd, fd[0], NULL)) {
 		// add recvctrl_fd to event poll
 		fprintf(stderr, "socket-server: can't add server fd to event pool.\n");

@@ -19,8 +19,8 @@
 #include <signal.h>
 
 struct monitor {
-	int count;
-	struct skynet_monitor ** m;
+	int count; // worker线程数量
+	struct skynet_monitor ** m; // 保存每个worker线程对应的skynet_monitor指针
 	pthread_cond_t cond;
 	pthread_mutex_t mutex;
 	int sleep;
@@ -60,6 +60,7 @@ wakeup(struct monitor *m, int busy) {
 	}
 }
 
+// socket线程对应执行的函数
 static void *
 thread_socket(void *p) {
 	struct monitor * m = p;
@@ -90,6 +91,7 @@ free_monitor(struct monitor *m) {
 	skynet_free(m);
 }
 
+// monitor线程对应执行的函数
 static void *
 thread_monitor(void *p) {
 	struct monitor * m = p;
@@ -98,6 +100,8 @@ thread_monitor(void *p) {
 	skynet_initthread(THREAD_MONITOR);
 	for (;;) {
 		CHECK_ABORT
+
+		// 检查每一个worker线程
 		for (i=0;i<n;i++) {
 			skynet_monitor_check(m->m[i]);
 		}
@@ -125,6 +129,7 @@ signal_hup() {
 	}
 }
 
+// timer线程对应执行的函数
 static void *
 thread_timer(void *p) {
 	struct monitor * m = p;
@@ -134,6 +139,7 @@ thread_timer(void *p) {
 		skynet_socket_updatetime();
 		CHECK_ABORT
 		wakeup(m,m->count-1);
+		// usleep 单位是 microsecond，即微妙
 		usleep(2500);
 		if (SIG) {
 			signal_hup();
@@ -183,6 +189,7 @@ static void
 start(int thread) {
 	pthread_t pid[thread+3];
 
+	// 初始化monitor对应变量信息，这个变量m在所有线程之间都是可以访问的
 	struct monitor *m = skynet_malloc(sizeof(*m));
 	memset(m, 0, sizeof(*m));
 	m->count = thread;
@@ -202,10 +209,12 @@ start(int thread) {
 		exit(1);
 	}
 
+	// 创建三个基础线程
 	create_thread(&pid[0], thread_monitor, m);
 	create_thread(&pid[1], thread_timer, m);
 	create_thread(&pid[2], thread_socket, m);
 
+	// 根据配置，创建相应数量的worker线程
 	static int weight[] = { 
 		-1, -1, -1, -1, 0, 0, 0, 0,
 		1, 1, 1, 1, 1, 1, 1, 1, 
@@ -230,6 +239,7 @@ start(int thread) {
 	free_monitor(m);
 }
 
+// 创建 snlua 对应的 ctx，参数为bootstrap，即有配置文件bootstrap来确定name 和 args
 static void
 bootstrap(struct skynet_context * logger, const char * cmdline) {
 	int sz = strlen(cmdline);
@@ -280,18 +290,23 @@ skynet_start(struct skynet_config * config) {
 	// 初始化管理socket的结构体，包括epool的fd
 	skynet_socket_init();
 
+	// 设置 profile  开关
 	skynet_profile_enable(config->profile);
 
+	// 创建一个 log 对应的ctx
 	struct skynet_context *ctx = skynet_context_new(config->logservice, config->logger);
 	if (ctx == NULL) {
 		fprintf(stderr, "Can't launch %s service\n", config->logservice);
 		exit(1);
 	}
 
+	// 给刚创建的log ctx 附加一个名字为 logger
 	skynet_handle_namehandle(skynet_context_handle(ctx), "logger");
 
+	// 创建 snlua 对应的 ctx，参数为bootstrap，即有配置文件bootstrap来确定name 和 args
 	bootstrap(ctx, config->bootstrap);
 
+	// 创建相应线程，启动服务
 	start(config->thread);
 
 	// harbor_exit may call socket send, so it should exit before socket_free

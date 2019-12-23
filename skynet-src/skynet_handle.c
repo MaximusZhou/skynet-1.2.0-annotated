@@ -16,21 +16,28 @@ struct handle_name {
 	uint32_t handle;
 };
 
+// 用来管理所有的 skynet_context
 struct handle_storage {
 	struct rwlock lock;
 
-	uint32_t harbor;
-	uint32_t handle_index;
+	uint32_t harbor;  // 保存对应的 harbor 的id，即配置文件确定的
+	uint32_t handle_index; // 初始值为1，一直递增的，用于查找一个空的 slot，用于保存 context
 	int slot_size;
-	struct skynet_context ** slot;
+	struct skynet_context ** slot;  // 指向一个数组，数组大小为slot_size, 数组每个元素保存 skynet_context 指针
 	
+	// 用于保存所有 ctx 对应的名字
 	int name_cap;
 	int name_count;
-	struct handle_name *name;
+
+	// 大小为 name_cap 个 handle_name 数组，包含真正的handle_name数量为name_count
+	// 数组是按名字大小排序保存的
+	struct handle_name *name;  
 };
 
 static struct handle_storage *H = NULL;
 
+// 该接口返回ctx对应的handle，handle可以认为是ctx的索引，即对应的标识
+// 通过 hanle & (slot_size - 1)，可以获得ctx在slot数组中的下标
 uint32_t
 skynet_handle_register(struct skynet_context *ctx) {
 	struct handle_storage *s = H;
@@ -74,6 +81,7 @@ skynet_handle_register(struct skynet_context *ctx) {
 	}
 }
 
+// 把 handle 对应的 ctx 和相应名字从管理模块中删除 
 int
 skynet_handle_retire(uint32_t handle) {
 	int ret = 0;
@@ -84,6 +92,7 @@ skynet_handle_retire(uint32_t handle) {
 	uint32_t hash = handle & (s->slot_size-1);
 	struct skynet_context * ctx = s->slot[hash];
 
+	// 从slot数组中删除对应的ctx，并且从 handle_name 数组中，删除对应的name
 	if (ctx != NULL && skynet_context_handle(ctx) == handle) {
 		s->slot[hash] = NULL;
 		ret = 1;
@@ -186,6 +195,7 @@ skynet_handle_findname(const char * name) {
 	return handle;
 }
 
+// 插入到指定的位置
 static void
 _insert_name_before(struct handle_storage *s, char *name, uint32_t handle, int before) {
 	if (s->name_count >= s->name_cap) {
@@ -212,6 +222,7 @@ _insert_name_before(struct handle_storage *s, char *name, uint32_t handle, int b
 	s->name_count ++;
 }
 
+// 把相应的 name 插入到数组中，如果已经存在了，则直接返回NULL
 static const char *
 _insert_name(struct handle_storage *s, const char * name, uint32_t handle) {
 	int begin = 0;
@@ -236,6 +247,7 @@ _insert_name(struct handle_storage *s, const char * name, uint32_t handle) {
 	return result;
 }
 
+// 给相应的 handle 命名为 name
 const char * 
 skynet_handle_namehandle(uint32_t handle, const char *name) {
 	rwlock_wlock(&H->lock);

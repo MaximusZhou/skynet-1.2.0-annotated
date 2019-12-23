@@ -41,8 +41,8 @@
 #endif
 
 struct skynet_context {
-	void * instance;
-	struct skynet_module * mod;
+	void * instance; // 保存so文件中 _create 函数返回值
+	struct skynet_module * mod; // so 文件对应的模块结构体，一个so文件可以多个 skynet_context 实例
 	void * cb_ud;
 	skynet_cb cb;
 	struct message_queue *queue;
@@ -62,7 +62,7 @@ struct skynet_context {
 };
 
 struct skynet_node {
-	int total;
+	int total; // 保存 node 对应的 context 的数量
 	int init;
 	uint32_t monitor_exit;
 	pthread_key_t handle_key;
@@ -122,10 +122,11 @@ drop_message(struct skynet_message *msg, void *ud) {
 	skynet_send(NULL, source, msg->source, PTYPE_ERROR, 0, NULL, 0);
 }
 
+// 创建一个so对应的ctx
 struct skynet_context * 
 skynet_context_new(const char * name, const char *param) {
 
-	// 获取name.so文件对应的模块
+	// 获取name.so文件对应的模块，一个模块可以对应多个ctx
 	struct skynet_module * mod = skynet_module_query(name);
 
 	if (mod == NULL)
@@ -140,7 +141,10 @@ skynet_context_new(const char * name, const char *param) {
 
 	ctx->mod = mod;
 	ctx->instance = inst;
-	ctx->ref = 2;
+
+	// 后面初始化成功，会调用skynet_context_release ref 减 1
+	// TODO 这个地方没看懂为什么这样做？？？
+	ctx->ref = 2; 
 	ctx->cb = NULL;
 	ctx->cb_ud = NULL;
 	ctx->session_id = 0;
@@ -155,19 +159,30 @@ skynet_context_new(const char * name, const char *param) {
 	ctx->profile = G_NODE.profile;
 	// Should set to 0 first to avoid skynet_handle_retireall get an uninitialized handle
 	ctx->handle = 0;	
-	ctx->handle = skynet_handle_register(ctx); // 返回的handle，可以认为是ctx的索引，能快速获得相应的ctx
+
+	// 返回的handle，可以认为是ctx的索引，能快速获得相应的ctx
+	ctx->handle = skynet_handle_register(ctx); 
+
+	// 创建 ctx 对应的消息队列
 	struct message_queue * queue = ctx->queue = skynet_mq_create(ctx->handle);
 	// init function maybe use ctx->handle, so it must init at last
+	
+	// 增加这个 node 上 ctx数量
 	context_inc();
 
+	// 调用模块的 _init 函数
 	CHECKCALLING_BEGIN(ctx)
 	int r = skynet_module_instance_init(mod, inst, ctx, param);
 	CHECKCALLING_END(ctx)
 	if (r == 0) {
+		// 初始化成功
+		
 		struct skynet_context * ret = skynet_context_release(ctx);
 		if (ret) {
 			ctx->init = true;
 		}
+
+		// 把 ctx 对应的消息队列 push 到全局队列中
 		skynet_globalmq_push(queue);
 		if (ret) {
 			skynet_error(ret, "LAUNCH %s %s", name, param ? param : "");
@@ -208,11 +223,15 @@ skynet_context_reserve(struct skynet_context *ctx) {
 	context_dec();
 }
 
+// 删除相应的ctx
 static void 
 delete_context(struct skynet_context *ctx) {
+	// 关闭ctx对应的文件
 	if (ctx->logfile) {
 		fclose(ctx->logfile);
 	}
+
+	// 调用ctx so 对应的 _release 函数 
 	skynet_module_instance_release(ctx->mod, ctx->instance);
 	skynet_mq_mark_release(ctx->queue);
 	CHECKCALLING_DESTROY(ctx)
@@ -220,6 +239,7 @@ delete_context(struct skynet_context *ctx) {
 	context_dec();
 }
 
+// ctx 对应的计数减 1，为0，则释放
 struct skynet_context * 
 skynet_context_release(struct skynet_context *ctx) {
 	if (ATOM_DEC(&ctx->ref) == 0) {
@@ -827,9 +847,12 @@ skynet_globalexit(void) {
 	pthread_key_delete(G_NODE.handle_key);
 }
 
+// 给线程设置相应的类型标识，标识线程是什么类型的
 void
 skynet_initthread(int m) {
 	uintptr_t v = (uint32_t)(-m);
+
+	// pthread_setspecific 给相应的线程设置标识为v
 	pthread_setspecific(G_NODE.handle_key, (void *)v);
 }
 

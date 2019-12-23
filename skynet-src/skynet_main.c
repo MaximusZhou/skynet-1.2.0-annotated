@@ -81,7 +81,7 @@ int sigign() {
 	sa.sa_handler = SIG_IGN;  // 忽略相应的信号
 	sa.sa_flags = 0;
 	sigemptyset(&sa.sa_mask);
-	sigaction(SIGPIPE, &sa, 0); // SIGPIPE 在收到RST响应后，还向关闭的链接发送数据，会收到这个信号
+	sigaction(SIGPIPE, &sa, 0); // SIGPIPE 在收到RST响应后，仍然向关闭的链接发送数据，会收到这个信号
 	return 0;
 }
 
@@ -169,7 +169,9 @@ main(int argc, char *argv[]) {
 	// } 读取配置文件结束
 
 	skynet_start(&config);
+	// 全局清理工作
 	skynet_globalexit();
+
 	luaS_exitshr();
 
 	return 0;
