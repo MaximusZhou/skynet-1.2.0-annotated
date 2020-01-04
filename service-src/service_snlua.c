@@ -9,14 +9,15 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+// 一个 snlua 服务分配的内存数报警的初始阈值，每当触发一次报警，相应阈值*2
 #define MEMORY_WARNING_REPORT (1024 * 1024 * 32)
 
 struct snlua {
-	lua_State * L;
+	lua_State * L; // 每一个snlua服务，对应一个独立的 lua_State
 	struct skynet_context * ctx;
-	size_t mem;
-	size_t mem_report;
-	size_t mem_limit;
+	size_t mem; // 当前累积分配的内存数
+	size_t mem_report; // 分配内存数报警的值
+	size_t mem_limit; // 最多分配的内存数，默认为0，没有限制的
 };
 
 // LUA_CACHELIB may defined in patched lua for shared proto
@@ -80,8 +81,11 @@ init_cb(struct snlua *l, struct skynet_context *ctx, const char * args, size_t s
 	lua_pushboolean(L, 1);  /* signal for libraries to ignore env. vars. */
 	lua_setfield(L, LUA_REGISTRYINDEX, "LUA_NOENV");
 	luaL_openlibs(L);
+
+	// 设置全局变量skynet_context
 	lua_pushlightuserdata(L, ctx);
 	lua_setfield(L, LUA_REGISTRYINDEX, "skynet_context");
+
 	luaL_requiref(L, "skynet.codecache", codecache , 0);
 	lua_pop(L,1);
 
@@ -131,10 +135,12 @@ init_cb(struct snlua *l, struct skynet_context *ctx, const char * args, size_t s
 	return 0;
 }
 
+// 第一条消息的回调函数
 static int
 launch_cb(struct skynet_context * context, void *ud, int type, int session, uint32_t source , const void * msg, size_t sz) {
 	assert(type == 0 && session == 0);
 	struct snlua *l = ud;
+	// 取消掉 snlua 服务的回调函数
 	skynet_callback(context, NULL, NULL);
 	int err = init_cb(l, context, msg, sz);
 	if (err) {
@@ -144,11 +150,13 @@ launch_cb(struct skynet_context * context, void *ud, int type, int session, uint
 	return 0;
 }
 
+// 这里参数 args 就是 examples/config 中配置 bootstrap
 int
 snlua_init(struct snlua *l, struct skynet_context *ctx, const char * args) {
 	int sz = strlen(args);
 	char * tmp = skynet_malloc(sz);
 	memcpy(tmp, args, sz);
+	// 设置服务的回调函数为 launch_cb
 	skynet_callback(ctx, l , launch_cb);
 	const char * self = skynet_command(ctx, "REG", NULL);
 	uint32_t handle_id = strtoul(self+1, NULL, 16);
@@ -157,6 +165,8 @@ snlua_init(struct snlua *l, struct skynet_context *ctx, const char * args) {
 	return 0;
 }
 
+// lua 虚拟机中，分配内存回调的接口，即接管 lua 虚拟机的内存分配
+// 参数 ptr 是原来指向的内存，osize 原来指向的内存大小，nsize 表示想分配的内存大小
 static void *
 lalloc(void * ud, void *ptr, size_t osize, size_t nsize) {
 	struct snlua *l = ud;

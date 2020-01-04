@@ -5,10 +5,14 @@
 #include <stdint.h>
 #include <string.h>
 
+/*
+* 改文件生成相应的动态库logger.so
+*/
+
 struct logger {
-	FILE * handle;
-	char * filename;
-	int close;
+	FILE * handle; // log 对应的文件描述符
+	char * filename; // log对应的文件路径
+	int close; // 释放的时候，是否需要关闭，如果没有指定文件路径，用标准输出，则不用关闭
 };
 
 struct logger *
@@ -64,6 +68,7 @@ logger_init(struct logger * inst, struct skynet_context *ctx, const char * parm)
 		inst->handle = stdout;
 	}
 	if (inst->handle) {
+		// 设置ctx 相应的回调函数为logger_cb，参数为inst
 		skynet_callback(ctx, inst, logger_cb);
 		return 0;
 	}
