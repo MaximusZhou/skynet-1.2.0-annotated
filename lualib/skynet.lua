@@ -1,4 +1,6 @@
 -- read https://github.com/cloudwu/skynet/wiki/FAQ for the module "skynet.core"
+-- 对应实现在lualib-src/lua-skynet.c中，接口luaopen_skynet_core
+-- lua 文档里面可以看到require "skynet.core" 会自动调用接口 luaopen_skynet_core
 local c = require "skynet.core"
 local tostring = tostring
 local coroutine = coroutine
@@ -734,6 +736,7 @@ function skynet.init_service(start)
 end
 
 function skynet.start(start_func)
+	-- 设置当前 snlua 服务的回调函数为  skynet.dispatch_message
 	c.callback(skynet.dispatch_message)
 	init_thread = skynet.timeout(0, function()
 		skynet.init_service(start_func)
