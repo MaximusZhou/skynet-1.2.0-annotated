@@ -427,6 +427,7 @@ cmd_timeout(struct skynet_context * context, const char * param) {
 	return context->result;
 }
 
+// 返回相应 context 的名字
 static const char *
 cmd_reg(struct skynet_context * context, const char * param) {
 	if (param == NULL || param[0] == '\0') {
@@ -685,6 +686,7 @@ static struct command_func cmd_funcs[] = {
 	{ NULL, NULL },
 };
 
+// 执行 cmd 相应的函数
 const char * 
 skynet_command(struct skynet_context * context, const char * cmd , const char * param) {
 	struct command_func * method = &cmd_funcs[0];
@@ -716,6 +718,7 @@ _filter_args(struct skynet_context * context, int type, int *session, void ** da
 		*data = msg;
 	}
 
+	// 把消息 type 放在消息长度的高8位
 	*sz |= (size_t)type << MESSAGE_TYPE_SHIFT;
 }
 
@@ -744,6 +747,7 @@ skynet_send(struct skynet_context * context, uint32_t source, uint32_t destinati
 		return session;
 	}
 	if (skynet_harbor_message_isremote(destination)) {
+		// 发送到另外一个集群上
 		struct remote_message * rmsg = skynet_malloc(sizeof(*rmsg));
 		rmsg->destination.handle = destination;
 		rmsg->message = data;
@@ -757,6 +761,7 @@ skynet_send(struct skynet_context * context, uint32_t source, uint32_t destinati
 		smsg.data = data;
 		smsg.sz = sz;
 
+		// push 到 目标handle 的队列上
 		if (skynet_context_push(destination, &smsg)) {
 			skynet_free(data);
 			return -1;

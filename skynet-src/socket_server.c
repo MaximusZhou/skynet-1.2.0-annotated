@@ -23,7 +23,7 @@
 #define MAX_EVENT 64
 #define MIN_READ_BUFFER 64
 #define SOCKET_TYPE_INVALID 0
-#define SOCKET_TYPE_RESERVE 1
+#define SOCKET_TYPE_RESERVE 1  // 新创建的套接字，还没初始化时候套接字类型
 #define SOCKET_TYPE_PLISTEN 2
 #define SOCKET_TYPE_LISTEN 3
 #define SOCKET_TYPE_CONNECTING 4
@@ -107,16 +107,16 @@ struct socket {
 
 struct socket_server {
 	volatile uint64_t time; // 系统当前时间
-	int recvctrl_fd; // 用于接收数据的 fd，即管道的写端
-	int sendctrl_fd; // 用于发送数据的 fd，即管道的写端
-	int checkctrl;
+	int recvctrl_fd; // 用于接收命令行数据的 fd，即管道的读端
+	int sendctrl_fd; // 用于发送命令行数据的 fd，即管道的写端
+	int checkctrl; // 用于表示是否检查处理命令行相关数据，初始值为1
 	poll_fd event_fd; // epoll 对应的 fd
 	int alloc_id;
-	int event_n;
-	int event_index;
+	int event_n; // 初始值为0
+	int event_index; // 初始化值为0
 	struct socket_object_interface soi;
-	struct event ev[MAX_EVENT];
-	struct socket slot[MAX_SOCKET];
+	struct event ev[MAX_EVENT]; // 保存当前可读写的事件信息
+	struct socket slot[MAX_SOCKET]; // 保存所有套接字
 	char buffer[MAX_INFO];
 	uint8_t udpbuffer[MAX_UDP_PACKAGE];
 	fd_set rfds;
@@ -302,6 +302,7 @@ socket_keepalive(int fd) {
 	setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, (void *)&keepalive , sizeof(keepalive));  
 }
 
+// 给一个链接，生成一个id，方便在slot中查到
 static int
 reserve_id(struct socket_server *ss) {
 	int i;
@@ -469,6 +470,7 @@ check_wb_list(struct wb_list *s) {
 	assert(s->tail == NULL);
 }
 
+// 初始化新的套接字信息
 static struct socket *
 new_fd(struct socket_server *ss, int id, int fd, int protocol, uintptr_t opaque, bool add) {
 	struct socket * s = &ss->slot[HASH_ID(id)];
@@ -990,6 +992,8 @@ bind_socket(struct socket_server *ss, struct request_bind *request, struct socke
 	return SOCKET_OPEN;
 }
 
+// 把对应的链接状态由 准备状态(SOCKET_TYPE_PACCEPT SOCKET_TYPE_PLISTEN) 改成
+// 正式状态(SOCKET_TYPE_CONNECTED SOCKET_TYPE_LISTEN)
 static int
 start_socket(struct socket_server *ss, struct request_start *request, struct socket_message *result) {
 	int id = request->id;
@@ -1035,6 +1039,7 @@ setopt_socket(struct socket_server *ss, struct request_setopt *request) {
 	setsockopt(s->fd, IPPROTO_TCP, request->what, &v, sizeof(v));
 }
 
+// 从管道里面读取所有的命令行数据
 static void
 block_readpipe(int pipefd, void *buffer, int sz) {
 	for (;;) {
@@ -1057,7 +1062,9 @@ has_cmd(struct socket_server *ss) {
 	int retval;
 
 	FD_SET(ss->recvctrl_fd, &ss->rfds);
-
+	
+	// 不阻塞检查 recvctrl_fd 是否有数据可以读取
+	// 第一个参数设置为最高的fd + 1
 	retval = select(ss->recvctrl_fd+1, &ss->rfds, NULL, NULL, &tv);
 	if (retval == 1) {
 		return 1;
@@ -1149,9 +1156,11 @@ ctrl_cmd(struct socket_server *ss, struct socket_message *result) {
 	// the length of message is one byte, so 256+8 buffer size is enough.
 	uint8_t buffer[256];
 	uint8_t header[2];
+	// 从管道读取命令的类型和相应数据长度
 	block_readpipe(fd, header, sizeof(header));
 	int type = header[0];
 	int len = header[1];
+	// 从管道读取命令对应的数据
 	block_readpipe(fd, buffer, len);
 	// ctrl command only exist in local fd, so don't worry about endian.
 	switch (type) {
@@ -1356,6 +1365,7 @@ getname(union sockaddr_all *u, char *buffer, size_t sz) {
 	}
 }
 
+// 接收新的链接
 // return 0 when failed, or -1 when file limit
 static int
 report_accept(struct socket_server *ss, struct socket *s, struct socket_message *result) {
@@ -1419,6 +1429,7 @@ clear_closed_event(struct socket_server *ss, struct socket_message * result, int
 	}
 }
 
+// socket 线程中的 poll 接口 调用这个函数
 // return type
 int 
 socket_server_poll(struct socket_server *ss, struct socket_message * result, int * more) {
@@ -1435,7 +1446,9 @@ socket_server_poll(struct socket_server *ss, struct socket_message * result, int
 				ss->checkctrl = 0;
 			}
 		}
+
 		if (ss->event_index == ss->event_n) {
+			// 所有的事件处理完后，调用epoll_wait等待相应的事件到来
 			ss->event_n = sp_wait(ss->event_fd, ss->ev, MAX_EVENT);
 			ss->checkctrl = 1;
 			if (more) {
@@ -1444,12 +1457,15 @@ socket_server_poll(struct socket_server *ss, struct socket_message * result, int
 			ss->event_index = 0;
 			if (ss->event_n <= 0) {
 				ss->event_n = 0;
+				// epoll_wait 被信号中断了
 				if (errno == EINTR) {
 					continue;
 				}
 				return -1;
 			}
 		}
+
+		// 处理每一个可读写的事件
 		struct event *e = &ss->ev[ss->event_index++];
 		struct socket *s = e->s;
 		if (s == NULL) {

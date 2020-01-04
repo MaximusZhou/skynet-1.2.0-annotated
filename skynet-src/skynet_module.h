@@ -9,8 +9,10 @@ typedef void (*skynet_dl_release)(void * inst);
 typedef void (*skynet_dl_signal)(void * inst, int signal);
 
 struct skynet_module {
-	const char * name;
-	void * module;
+	const char * name; // 模块名字
+	void * module; // 保存系统接口 dlopen 返回的值，即so文件在内存中的标识
+
+	// 下面成员包括模块对应函数的地址
 	skynet_dl_create create;
 	skynet_dl_init init;
 	skynet_dl_release release;

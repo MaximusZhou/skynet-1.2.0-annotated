@@ -20,7 +20,7 @@ static size_t _memory_block = 0;
 
 struct mem_data {
 	uint32_t handle;
-	ssize_t allocated;
+	ssize_t allocated;  // 分配的总的内存数量
 };
 
 struct mem_cookie {
@@ -33,7 +33,7 @@ struct mem_cookie {
 #define SLOT_SIZE 0x10000
 #define PREFIX_SIZE sizeof(struct mem_cookie)
 
-static struct mem_data mem_stats[SLOT_SIZE];
+static struct mem_data mem_stats[SLOT_SIZE]; // 保存所有的handle内存分配的信息
 
 
 #ifndef NOUSE_JEMALLOC
@@ -276,10 +276,11 @@ skynet_strdup(const char *str) {
 	return ret;
 }
 
+// lua 虚拟机分配内存，最后调用这个接口
 void * 
 skynet_lalloc(void *ptr, size_t osize, size_t nsize) {
 	if (nsize == 0) {
-		raw_free(ptr);
+		raw_free(ptr); // 将要分配的内存为0，则表示 free 掉原来分配的内存
 		return NULL;
 	} else {
 		return raw_realloc(ptr, nsize);

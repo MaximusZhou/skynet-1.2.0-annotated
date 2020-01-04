@@ -11,6 +11,7 @@
 #include <string.h>
 #include <stdbool.h>
 
+// 在服务器启动的时候初始化
 static struct socket_server * SOCKET_SERVER = NULL;
 
 // 服务器启动时候调用，初始化管理 socket 相关的结构体
@@ -35,6 +36,7 @@ skynet_socket_updatetime() {
 	socket_server_updatetime(SOCKET_SERVER, skynet_now());
 }
 
+// 把收到的数据或者消息放到消息队列中
 // mainloop thread
 static void
 forward_message(int type, bool padding, struct socket_message * result) {
@@ -76,6 +78,7 @@ forward_message(int type, bool padding, struct socket_message * result) {
 	}
 }
 
+// socket 线程for循环调用的接口
 int 
 skynet_socket_poll() {
 	struct socket_server *ss = SOCKET_SERVER;

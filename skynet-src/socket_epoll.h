@@ -25,6 +25,7 @@ sp_release(int efd) {
 	close(efd);
 }
 
+// 监听 sock，EPOLLIN表示 sock 是否有数据可读的
 static int 
 sp_add(int efd, int sock, void *ud) {
 	struct epoll_event ev;
@@ -52,6 +53,7 @@ sp_write(int efd, int sock, void *ud, bool enable) {
 static int 
 sp_wait(int efd, struct event *e, int max) {
 	struct epoll_event ev[max];
+	// 系统调用epoll_wait将阻塞等待数据读取，直到有数据读取，可读取的事件放到数组ev中
 	int n = epoll_wait(efd , ev, max, -1);
 	int i;
 	for (i=0;i<n;i++) {
