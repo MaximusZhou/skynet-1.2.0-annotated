@@ -1,4 +1,4 @@
-local skynet = require "skynet"
+local skynet = require "skynet" -- 即对应模块lualib/skynet.lua
 local harbor = require "skynet.harbor"
 require "skynet.manager"	-- import skynet.launch, ...
 local memory = require "skynet.memory"
