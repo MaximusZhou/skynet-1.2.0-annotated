@@ -143,6 +143,7 @@ skynet_context_new(const char * name, const char *param) {
 	ctx->instance = inst;
 
 	// 后面初始化成功，会调用skynet_context_release ref 减 1
+	// 主要是在失败的时候，调用skynet_handle_retire，相应接口也会调用skynet_context_release接口
 	// TODO 这个地方没看懂为什么这样做？？？
 	ctx->ref = 2; 
 	ctx->cb = NULL;
@@ -316,6 +317,9 @@ skynet_context_dispatchall(struct skynet_context * ctx) {
 	}
 }
 
+// 该接口在工作线程执行函数被调用，主要功是消息队列中pop出消息，
+// 然后调用dispatch_message接口，并且返回值为下一个要消费的次级消息队列
+// （返回的次级消息队列已经从全局消息队列中pop出来了）
 struct message_queue * 
 skynet_context_message_dispatch(struct skynet_monitor *sm, struct message_queue *q, int weight) {
 	if (q == NULL) {
@@ -337,10 +341,12 @@ skynet_context_message_dispatch(struct skynet_monitor *sm, struct message_queue 
 	struct skynet_message msg;
 
 	for (i=0;i<n;i++) {
+		// skynet_mq_pop 返回1表示这个次级消息队列，已经消费完了
 		if (skynet_mq_pop(q,&msg)) {
 			skynet_context_release(ctx);
 			return skynet_globalmq_pop();
 		} else if (i==0 && weight >= 0) {
+			// 根据权重，消费指定数量的消息
 			n = skynet_mq_length(q);
 			n >>= weight;
 		}
@@ -360,12 +366,15 @@ skynet_context_message_dispatch(struct skynet_monitor *sm, struct message_queue 
 		skynet_monitor_trigger(sm, 0,0);
 	}
 
+	// 次级消费队列q还没有消费完
 	assert(q == ctx->queue);
 	struct message_queue *nq = skynet_globalmq_pop();
 	if (nq) {
 		// If global mq is not empty , push q back, and return next queue (nq)
 		// Else (global mq is empty or block, don't push q back, and return q again (for next dispatch)
-		skynet_globalmq_push(q);
+		// 把没有消费完成的次级消息队列，push到全局消息队列中，等待下次消费
+		// 如果消息队列为空了，则返回当前没有消费完的次级消息队列
+		skynet_globalmq_push(q); 
 		q = nq;
 	} 
 	skynet_context_release(ctx);
@@ -815,6 +824,7 @@ skynet_context_handle(struct skynet_context *ctx) {
 	return ctx->handle;
 }
 
+// 设置服务处理消息对应的回调函数和参数，通常是在*_init调用的，比如logger_init函数中调用的
 void 
 skynet_callback(struct skynet_context * context, void *ud, skynet_cb cb) {
 	context->cb = cb;

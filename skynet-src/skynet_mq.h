@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 struct skynet_message {
-	uint32_t source;
+	uint32_t source; // 发送消息服务对应的handle
 	int session;
 	void * data;
 	size_t sz;
