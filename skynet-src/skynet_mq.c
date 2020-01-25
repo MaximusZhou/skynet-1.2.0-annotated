@@ -18,18 +18,19 @@
 #define MQ_IN_GLOBAL 1
 #define MQ_OVERLOAD 1024
 
+// 每个服务对应的次级消息队列
 struct message_queue {
 	struct spinlock lock;
-	uint32_t handle;
-	int cap;
-	int head;
+	uint32_t handle; // 消息队列所属服务的handle
+	int cap; // 消息队列容量，即字段queue对应的数组大小
+	int head; // 使用循环消息队列实现方式，head 和 tail 分别指向消息队列第一条消息和最后一条消息
 	int tail;
-	int release;
-	int in_global;
-	int overload;
-	int overload_threshold;
-	struct skynet_message *queue;
-	struct message_queue *next;
+	int release; // 设置1，表示消息队列的服务被删除释放了
+	int in_global; // 当前次级消息队列是否在全局消息队列中，注意创建时候，也把该值设置为MQ_IN_GLOBAL，虽然此时还不在全局消息队列中
+	int overload; // 保存消息队列中实质消息的数目
+	int overload_threshold; // 这个字段的大小一定是2^n
+	struct skynet_message *queue; // 保存该消息队列所有消息的数组
+	struct message_queue *next; // 如果改消息在全局消息队列中，则指向下一个消息队列，否则为NULL
 };
 
 struct global_queue {
@@ -75,6 +76,7 @@ skynet_globalmq_pop() {
 	return mq;
 }
 
+// 创建一个服务的次级消息队列
 struct message_queue * 
 skynet_mq_create(uint32_t handle) {
 	struct message_queue *q = skynet_malloc(sizeof(*q));
@@ -96,6 +98,7 @@ skynet_mq_create(uint32_t handle) {
 	return q;
 }
 
+// 释放次级消息队列分配的内存
 static void 
 _release(struct message_queue *q) {
 	assert(q->next == NULL);
@@ -109,6 +112,7 @@ skynet_mq_handle(struct message_queue *q) {
 	return q->handle;
 }
 
+// 计算次级消息队列中消息的长度
 int
 skynet_mq_length(struct message_queue *q) {
 	int head, tail,cap;
@@ -135,12 +139,14 @@ skynet_mq_overload(struct message_queue *q) {
 	return 0;
 }
 
+// 从次级消息队列中pop出一个消息，然后保存到message中返回
 int
 skynet_mq_pop(struct message_queue *q, struct skynet_message *message) {
 	int ret = 1;
 	SPIN_LOCK(q)
 
 	if (q->head != q->tail) {
+		// 次级消息队列不为空
 		*message = q->queue[q->head++];
 		ret = 0;
 		int head = q->head;
@@ -150,10 +156,14 @@ skynet_mq_pop(struct message_queue *q, struct skynet_message *message) {
 		if (head >= cap) {
 			q->head = head = 0;
 		}
+
+		// 计算队列中消息的数量
 		int length = tail - head;
 		if (length < 0) {
 			length += cap;
 		}
+
+		// 修改overload_threshold大小，其值一定是大于length，并且是最接近的2^n的大小
 		while (length > q->overload_threshold) {
 			q->overload = length;
 			q->overload_threshold *= 2;
@@ -187,6 +197,7 @@ expand_queue(struct message_queue *q) {
 	q->queue = new_queue;
 }
 
+// 往次级消息队列中push一个消息
 void 
 skynet_mq_push(struct message_queue *q, struct skynet_message *message) {
 	assert(message);
@@ -197,10 +208,14 @@ skynet_mq_push(struct message_queue *q, struct skynet_message *message) {
 		q->tail = 0;
 	}
 
+	// 表示队列已经满了
 	if (q->head == q->tail) {
 		expand_queue(q);
 	}
 
+	// 不在队列中再加入到全局消息队列
+	// 刚创建的消息队列，被设置为MQ_IN_GLOBAL
+	// 这样做后，没有完成初始化的服务的消息队列可以接收消息，但是不会被worker线程处理
 	if (q->in_global == 0) {
 		q->in_global = MQ_IN_GLOBAL;
 		skynet_globalmq_push(q);
@@ -218,6 +233,7 @@ skynet_mq_init() {
 }
 
 // 标记队列release了，不在全局队列，把它放到全局队列中
+// 服务删除时候，不能立即删除，原因是，次级消息队列还在全局队列中，被全局队列引用中
 void 
 skynet_mq_mark_release(struct message_queue *q) {
 	SPIN_LOCK(q)
@@ -229,6 +245,10 @@ skynet_mq_mark_release(struct message_queue *q) {
 	SPIN_UNLOCK(q)
 }
 
+// 如果队列中还有没被处理的消息，这时候需要调用回调函数
+// drop_message（skynet-src/skynet_server.c）中向原来服务的发送一个错误消息，
+// 通知这个服务其发送的目标服务没有处理这个消息（此时目标服务已经删除了），
+// 最后调用_release接口，即释放次级消息队列相应的内存。
 static void
 _drop_queue(struct message_queue *q, message_drop drop_func, void *ud) {
 	struct skynet_message msg;

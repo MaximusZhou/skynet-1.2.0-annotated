@@ -332,6 +332,8 @@ skynet_context_message_dispatch(struct skynet_monitor *sm, struct message_queue 
 
 	struct skynet_context * ctx = skynet_handle_grab(handle);
 	if (ctx == NULL) {
+		// 说明是已经删除的服务对应的次级消息队列，
+		// 真正删除相应的次级消息队列前，调用相应的回调函数drop_message
 		struct drop_t d = { handle };
 		skynet_mq_release(q, drop_message, &d);
 		return skynet_globalmq_pop();
@@ -342,6 +344,7 @@ skynet_context_message_dispatch(struct skynet_monitor *sm, struct message_queue 
 
 	for (i=0;i<n;i++) {
 		// skynet_mq_pop 返回1表示这个次级消息队列，已经消费完了
+		// 消费完成后，服务的对应的次级消息队列，也暂时不会push到全局消息队列中
 		if (skynet_mq_pop(q,&msg)) {
 			skynet_context_release(ctx);
 			return skynet_globalmq_pop();
