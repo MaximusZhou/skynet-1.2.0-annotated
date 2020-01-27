@@ -31,6 +31,8 @@ skynet_socket_free() {
 	SOCKET_SERVER = NULL;
 }
 
+// timer线程中轮询调用这个接口
+// 更新socket线程保存的skynet系统的时间
 void
 skynet_socket_updatetime() {
 	socket_server_updatetime(SOCKET_SERVER, skynet_now());

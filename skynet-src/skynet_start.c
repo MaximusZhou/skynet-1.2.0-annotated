@@ -20,17 +20,17 @@
 
 struct monitor {
 	int count; // worker线程数量
-	struct skynet_monitor ** m; // 保存每个worker线程对应的skynet_monitor指针
-	pthread_cond_t cond;
-	pthread_mutex_t mutex;
-	int sleep;
-	int quit;
+	struct skynet_monitor ** m; // 保存每个worker线程对应的skynet_monitor指针，大小为count
+	pthread_cond_t cond;  //  用于定时器线程和socket线程唤醒工作线程
+	pthread_mutex_t mutex; // 用于sleep变量的的互斥访问修改
+	int sleep; // 用来标识当前有多少工作线程在睡眠中
+	int quit; // 用来标识系统是否将要退出了
 };
 
 struct worker_parm {
-	struct monitor *m;
-	int id;
-	int weight;
+	struct monitor *m; // 指向monitor线程对应的struct monitor 实例
+	int id;  // 在所有的工作线程中对应的线程索引，从 0 开始，用来获取当前线程对应的监控结构体 skynet_monitor
+	int weight; // 线程的权重，用来决定每次最多消耗
 };
 
 static int SIG = 0;
@@ -73,6 +73,7 @@ thread_socket(void *p) {
 			CHECK_ABORT
 			continue;
 		}
+		// 如果所有的工作线程都是睡眠的，才去唤醒他们
 		wakeup(m,0);
 	}
 	return NULL;
@@ -138,6 +139,7 @@ thread_timer(void *p) {
 		skynet_updatetime();
 		skynet_socket_updatetime();
 		CHECK_ABORT
+		// 只要出现一个工作线程wait，则马上唤醒
 		wakeup(m,m->count-1);
 		// usleep 单位是 microsecond，即微妙
 		usleep(2500);
@@ -151,6 +153,7 @@ thread_timer(void *p) {
 	// wakeup all worker thread
 	pthread_mutex_lock(&m->mutex);
 	m->quit = 1;
+	// 唤醒所有的工作线程
 	pthread_cond_broadcast(&m->cond);
 	pthread_mutex_unlock(&m->mutex);
 	return NULL;
@@ -162,12 +165,14 @@ thread_worker(void *p) {
 	int id = wp->id;
 	int weight = wp->weight;
 	struct monitor *m = wp->m;
-	struct skynet_monitor *sm = m->m[id];
+	struct skynet_monitor *sm = m->m[id]; // 获取线程对应的监控结构体
 	skynet_initthread(THREAD_WORKER);
 	struct message_queue * q = NULL;
 	while (!m->quit) {
 		q = skynet_context_message_dispatch(sm, q, weight);
 		if (q == NULL) {
+			// 表示全局消息队列中没有消息了，则线程休息
+			// 等待timer线程，定时去唤醒工作线程
 			if (pthread_mutex_lock(&m->mutex) == 0) {
 				++ m->sleep;
 				// "spurious wakeup" is harmless,

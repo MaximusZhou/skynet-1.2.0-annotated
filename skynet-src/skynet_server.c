@@ -262,6 +262,7 @@ skynet_context_push(uint32_t handle, struct skynet_message *message) {
 	return 0;
 }
 
+// 在监控线程中触发调用
 void 
 skynet_context_endless(uint32_t handle) {
 	struct skynet_context * ctx = skynet_handle_grab(handle);
@@ -317,8 +318,9 @@ skynet_context_dispatchall(struct skynet_context * ctx) {
 	}
 }
 
-// 该接口在工作线程执行函数被调用，主要功是消息队列中pop出消息，
-// 然后调用dispatch_message接口，并且返回值为下一个要消费的次级消息队列
+// 该接口在工作线程执行函数被调用，主要功是全局消息队列中pop出次级消息队列，
+// 从次级消息队列pop出消息，然后每条消息调用dispatch_message接口，即处理每条消息
+// 并且返回值为下一个要消费的次级消息队列
 // （返回的次级消息队列已经从全局消息队列中pop出来了）
 struct message_queue * 
 skynet_context_message_dispatch(struct skynet_monitor *sm, struct message_queue *q, int weight) {

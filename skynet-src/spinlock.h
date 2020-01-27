@@ -19,6 +19,8 @@ spinlock_init(struct spinlock *lock) {
 
 static inline void
 spinlock_lock(struct spinlock *lock) {
+	// 接口 __sync_lock_test_and_set 把值1赋值给lock->lock，并且返回lock->lock操作之前的值
+	// 要求原来值为0，才算成功
 	while (__sync_lock_test_and_set(&lock->lock,1)) {}
 }
 
@@ -29,6 +31,7 @@ spinlock_trylock(struct spinlock *lock) {
 
 static inline void
 spinlock_unlock(struct spinlock *lock) {
+	// 将lock->lock设置为0
 	__sync_lock_release(&lock->lock);
 }
 
