@@ -22,12 +22,13 @@
 typedef void (*timer_execute_func)(void *ud,void *arg);
 
 #define TIME_NEAR_SHIFT 8
-#define TIME_NEAR (1 << TIME_NEAR_SHIFT) // 每一个层级的，轮盘的大小
+#define TIME_NEAR (1 << TIME_NEAR_SHIFT) // 第一层轮盘的大小
 #define TIME_LEVEL_SHIFT 6
-#define TIME_LEVEL (1 << TIME_LEVEL_SHIFT)
+#define TIME_LEVEL (1 << TIME_LEVEL_SHIFT) // 后面层级轮盘的大小
 #define TIME_NEAR_MASK (TIME_NEAR-1)
 #define TIME_LEVEL_MASK (TIME_LEVEL-1)
 
+// 每个定时器保存的额外数据，每个定时器都不一样
 struct timer_event {
 	uint32_t handle;  // 服务对应的handle
 	int session;      // 保存是服务那个session来增加定时器的，唯一标识一条消息
@@ -35,15 +36,17 @@ struct timer_event {
 
 // 相同时间超时定时器组成的链表节点
 struct timer_node {
-	struct timer_node *next;
-	uint32_t expire;
+	struct timer_node *next; // 同一个slot中的下一个定时器节点
+	uint32_t expire; // 保存相当于定时器的时间的过期时间
 };
 
+// 轮盘上每个slot对应的数据结构体
 struct link_list {
 	struct timer_node head; // 其next指向链表第一个timer_node
 	struct timer_node *tail;
 };
 
+// 全局定时器对应的数据结构体
 struct timer {
 	// 定时最大设置超时时间为，单位为10毫秒
 	// TIME_NEAR + TIME_NEAR * TIME_LEVEL + TIME_NEAR * TIME_LEVEL * TIME_LEVEL  + 
@@ -64,7 +67,7 @@ struct timer {
 
 static struct timer * TI = NULL;
 
-// 删除某层中的slot，并且返回
+// 删除某层中的slot，并且返回相应的链表
 static inline struct timer_node *
 link_clear(struct link_list *list) {
 	struct timer_node * ret = list->head.next;
@@ -120,7 +123,7 @@ timer_add(struct timer *T,void *arg,size_t sz,int time) {
 	SPIN_UNLOCK(T);
 }
 
-// 移到lvevel层级的，slot的下标为idx的链表
+// 移到level层级的，slot的下标为idx的链表，重新计算到新的位置上
 static void
 move_list(struct timer *T, int level, int idx) {
 	struct timer_node *current = link_clear(&T->t[level][idx]);
