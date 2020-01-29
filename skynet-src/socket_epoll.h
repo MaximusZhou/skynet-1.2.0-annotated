@@ -10,6 +10,7 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 
+// 检测 epoll_create 的返回值是否有效
 static bool 
 sp_invalid(int efd) {
 	return efd == -1;
@@ -17,15 +18,18 @@ sp_invalid(int efd) {
 
 static int
 sp_create() {
+	// 参数1024只是为了提示kernel预分配的内存大小用于相关的fd，当前已经没必要了，只要大于0即可
+	// kernel会自动适配大小的
 	return epoll_create(1024);
 }
 
+// 关闭 epoll_create 返回的套接字
 static void
 sp_release(int efd) {
 	close(efd);
 }
 
-// 监听 sock，EPOLLIN表示 sock 是否有数据可读的
+// 监听sock，EPOLLIN表示sock是否有数据可读的
 static int 
 sp_add(int efd, int sock, void *ud) {
 	struct epoll_event ev;

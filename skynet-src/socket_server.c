@@ -23,8 +23,8 @@
 #define MAX_EVENT 64
 #define MIN_READ_BUFFER 64
 #define SOCKET_TYPE_INVALID 0
-#define SOCKET_TYPE_RESERVE 1  // 新创建的套接字，还没初始化时候套接字类型
-#define SOCKET_TYPE_PLISTEN 2
+#define SOCKET_TYPE_RESERVE 1  // 新创建的套接字，还没初始化时候套接字类型，即用来占用slot位置
+#define SOCKET_TYPE_PLISTEN 2 // 创建和初始化套接字后的状态，等待开启监听
 #define SOCKET_TYPE_LISTEN 3
 #define SOCKET_TYPE_CONNECTING 4
 #define SOCKET_TYPE_CONNECTED 5
@@ -32,7 +32,7 @@
 #define SOCKET_TYPE_PACCEPT 7
 #define SOCKET_TYPE_BIND 8
 
-#define MAX_SOCKET (1<<MAX_SOCKET_P)
+#define MAX_SOCKET (1<<MAX_SOCKET_P) // 当前是2^16，即65536
 
 #define PRIORITY_HIGH 0
 #define PRIORITY_LOW 1
@@ -90,9 +90,9 @@ struct socket {
 	struct socket_stat stat;
 	volatile uint32_t sending;
 	int fd;
-	int id;
+	int id; // 通过HASH_ID(id)，可以获得在数组slot中的下标
 	uint8_t protocol;
-	uint8_t type; // socket 当前状态类型
+	uint8_t type; // socket 当前状态类型，初始值为 SOCKET_TYPE_INVALID
 	uint16_t udpconnecting;
 	int64_t warn_size;
 	union {
@@ -106,12 +106,12 @@ struct socket {
 };
 
 struct socket_server {
-	volatile uint64_t time; // 系统当前时间
+	volatile uint64_t time; // 保存skynet启动以来，经过的厘秒数
 	int recvctrl_fd; // 用于接收命令行数据的 fd，即管道的读端
 	int sendctrl_fd; // 用于发送命令行数据的 fd，即管道的写端
 	int checkctrl; // 用于表示是否检查处理命令行相关数据，初始值为1
 	poll_fd event_fd; // epoll 对应的 fd
-	int alloc_id;
+	int alloc_id; // 初始值为0，一直递增的，用来给新的套接字在slot数组中找一个空的位置
 	int event_n; // 初始值为0
 	int event_index; // 初始化值为0
 	struct socket_object_interface soi;
@@ -154,7 +154,7 @@ struct request_close {
 struct request_listen {
 	int id;
 	int fd;
-	uintptr_t opaque;
+	uintptr_t opaque; // 通常是服务的handle
 	char host[1];
 };
 
@@ -234,7 +234,7 @@ struct send_object {
 #define FREE skynet_free
 
 struct socket_lock {
-	struct spinlock *lock;
+	struct spinlock *lock; // 指向sokcet对应的锁，即结构体socket字段dw_lock
 	int count;
 };
 
@@ -313,6 +313,7 @@ reserve_id(struct socket_server *ss) {
 		}
 		struct socket *s = &ss->slot[HASH_ID(id)];
 		if (s->type == SOCKET_TYPE_INVALID) {
+			// 找一个空位置
 			if (ATOM_CAS(&s->type, SOCKET_TYPE_INVALID, SOCKET_TYPE_RESERVE)) {
 				s->id = id;
 				s->protocol = PROTOCOL_UNKNOWN;
@@ -336,7 +337,7 @@ clear_wb_list(struct wb_list *list) {
 	list->tail = NULL;
 }
 
-// 服务器启动时候会调用，创建管理 socket 相关的结构体 socket_server
+// 服务器启动时候在主线程调用，创建管理 socket 相关的结构体 socket_server
 struct socket_server * 
 socket_server_create(uint64_t time) {
 	int i;
@@ -375,6 +376,7 @@ socket_server_create(uint64_t time) {
 	ss->sendctrl_fd = fd[1];
 	ss->checkctrl = 1;
 
+	// 处理化字段slot，用来管理各个套接字的数组
 	for (i=0;i<MAX_SOCKET;i++) {
 		struct socket *s = &ss->slot[i];
 		s->type = SOCKET_TYPE_INVALID;
@@ -392,6 +394,8 @@ socket_server_create(uint64_t time) {
 	return ss;
 }
 
+// 在timer线程中轮询调用到
+// 更新socket线程保存的skynet系统的时间
 void
 socket_server_updatetime(struct socket_server *ss, uint64_t time) {
 	ss->time = time;
@@ -445,6 +449,8 @@ force_close(struct socket_server *ss, struct socket *s, struct socket_lock *l, s
 	socket_unlock(l);
 }
 
+// 服务器退出的时候，主线程中调用
+// 关闭套接字和释放相关资源
 void 
 socket_server_release(struct socket_server *ss) {
 	int i;
@@ -470,7 +476,7 @@ check_wb_list(struct wb_list *s) {
 	assert(s->tail == NULL);
 }
 
-// 初始化新的套接字信息
+// @socket线程：初始化新的套接字结构体sokcet信息
 static struct socket *
 new_fd(struct socket_server *ss, int id, int fd, int protocol, uintptr_t opaque, bool add) {
 	struct socket * s = &ss->slot[HASH_ID(id)];
@@ -919,6 +925,7 @@ send_socket(struct socket_server *ss, struct request_send * request, struct sock
 	return -1;
 }
 
+// 在socket线程中执行
 static int
 listen_socket(struct socket_server *ss, struct request_listen * request, struct socket_message *result) {
 	int id = request->id;
@@ -992,8 +999,9 @@ bind_socket(struct socket_server *ss, struct request_bind *request, struct socke
 	return SOCKET_OPEN;
 }
 
-// 把对应的链接状态由 准备状态(SOCKET_TYPE_PACCEPT SOCKET_TYPE_PLISTEN) 改成
-// 正式状态(SOCKET_TYPE_CONNECTED SOCKET_TYPE_LISTEN)
+// @socket线程，开启监听或者链接建立完成，即把相应的fd加入事件监控，准备接收数据，修相应的状态的
+// SOCKET_TYPE_PLISTEN --> SOCKET_TYPE_LISTEN
+// SOCKET_TYPE_PACCEPT --> SOCKET_TYPE_CONNECTED
 static int
 start_socket(struct socket_server *ss, struct request_start *request, struct socket_message *result) {
 	int id = request->id;
@@ -1009,11 +1017,14 @@ start_socket(struct socket_server *ss, struct request_start *request, struct soc
 	struct socket_lock l;
 	socket_lock_init(s, &l);
 	if (s->type == SOCKET_TYPE_PACCEPT || s->type == SOCKET_TYPE_PLISTEN) {
+		// 把fd加入事件监听，是否有数据可读
 		if (sp_add(ss->event_fd, s->fd, s)) {
 			force_close(ss, s, &l, result);
 			result->data = strerror(errno);
 			return SOCKET_ERR;
 		}
+		// SOCKET_TYPE_PLISTEN --> SOCKET_TYPE_LISTEN
+		// SOCKET_TYPE_PACCEPT --> SOCKET_TYPE_CONNECTED
 		s->type = (s->type == SOCKET_TYPE_PACCEPT) ? SOCKET_TYPE_CONNECTED : SOCKET_TYPE_LISTEN;
 		s->opaque = request->opaque;
 		result->data = "start";
@@ -1150,6 +1161,7 @@ dec_sending_ref(struct socket_server *ss, int id) {
 }
 
 // return type
+// @socket线程 从pipe中读取worker线程的请求，然后处理
 static int
 ctrl_cmd(struct socket_server *ss, struct socket_message *result) {
 	int fd = ss->recvctrl_fd;
@@ -1429,11 +1441,12 @@ clear_closed_event(struct socket_server *ss, struct socket_message * result, int
 	}
 }
 
-// socket 线程中的 poll 接口 调用这个函数
+// @socket线程 接口skynet_socket_poll调用这个接口
 // return type
 int 
 socket_server_poll(struct socket_server *ss, struct socket_message * result, int * more) {
 	for (;;) {
+		// 处理来自woker线程的请求，从pipe中读取
 		if (ss->checkctrl) {
 			if (has_cmd(ss)) {
 				int type = ctrl_cmd(ss, result);
@@ -1544,6 +1557,7 @@ socket_server_poll(struct socket_server *ss, struct socket_message * result, int
 	}
 }
 
+// 工作线程中执行，向pipe中写入数据
 static void
 send_request(struct socket_server *ss, struct request_package *request, char type, int len) {
 	request->header[6] = (uint8_t)type;
@@ -1682,6 +1696,7 @@ socket_server_send_lowpriority(struct socket_server *ss, int id, const void * bu
 	return 0;
 }
 
+// 在timer线程退出的时候调用，用来唤醒 sokcet线程，在timer线程中调用
 void
 socket_server_exit(struct socket_server *ss) {
 	struct request_package request;
@@ -1709,6 +1724,9 @@ socket_server_shutdown(struct socket_server *ss, uintptr_t opaque, int id) {
 
 // return -1 means failed
 // or return AF_INET or AF_INET6
+// 工作线程中执行
+// 参数 protocol 类型为 IPPROTO_TCP 或者是 IPPROTO_UDP
+// 接口工作：创建网络套接字、绑定到相应的地址
 static int
 do_bind(const char *host, int port, int protocol, int *family) {
 	int fd;
@@ -1731,6 +1749,7 @@ do_bind(const char *host, int port, int protocol, int *family) {
 	}
 	ai_hints.ai_protocol = protocol;
 
+	// 获取host和port对应的网络信息
 	status = getaddrinfo( host, portstr, &ai_hints, &ai_list );
 	if ( status != 0 ) {
 		return -1;
@@ -1756,6 +1775,7 @@ _failed_fd:
 	return -1;
 }
 
+// 工作线程中执行，返回相应监听的fd
 static int
 do_listen(const char * host, int port, int backlog) {
 	int family = 0;
@@ -1770,6 +1790,8 @@ do_listen(const char * host, int port, int backlog) {
 	return listen_fd;
 }
 
+// 工作线程中执行，请求创建一个监听套接字调用这个接口
+// 参数 opaque 通常是服务对应的handle
 int 
 socket_server_listen(struct socket_server *ss, uintptr_t opaque, const char * addr, int port, int backlog) {
 	int fd = do_listen(addr, port, backlog);
@@ -1802,6 +1824,7 @@ socket_server_bind(struct socket_server *ss, uintptr_t opaque, int fd) {
 	return id;
 }
 
+// @worker 线程，请求开始监听
 void 
 socket_server_start(struct socket_server *ss, uintptr_t opaque, int id) {
 	struct request_package request;

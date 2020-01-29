@@ -14,17 +14,19 @@
 // 在服务器启动的时候初始化
 static struct socket_server * SOCKET_SERVER = NULL;
 
-// 服务器启动时候调用，初始化管理 socket 相关的结构体
+// 服务器启动时候主线程调用，初始化管理 socket 相关的结构体
 void 
 skynet_socket_init() {
 	SOCKET_SERVER = socket_server_create(skynet_now());
 }
 
+// timer线程退出的时候调用，用来唤醒 sokcet线程
 void
 skynet_socket_exit() {
 	socket_server_exit(SOCKET_SERVER);
 }
 
+// 服务器退出的时候，主线程调用
 void
 skynet_socket_free() {
 	socket_server_release(SOCKET_SERVER);
@@ -38,7 +40,7 @@ skynet_socket_updatetime() {
 	socket_server_updatetime(SOCKET_SERVER, skynet_now());
 }
 
-// 把收到的数据或者消息放到消息队列中
+// socket线程调用，把收到的数据或者消息放到消息队列中
 // mainloop thread
 static void
 forward_message(int type, bool padding, struct socket_message * result) {
@@ -80,7 +82,7 @@ forward_message(int type, bool padding, struct socket_message * result) {
 	}
 }
 
-// socket 线程for循环调用的接口
+// @socket线程 轮询调用的接口
 int 
 skynet_socket_poll() {
 	struct socket_server *ss = SOCKET_SERVER;
@@ -122,6 +124,7 @@ skynet_socket_poll() {
 	return 1;
 }
 
+// { 下面接口都是供应用层调用的，通常worker线程调用，比如gate服务中
 int
 skynet_socket_send(struct skynet_context *ctx, int id, void *buffer, int sz) {
 	return socket_server_send(SOCKET_SERVER, id, buffer, sz);
@@ -206,3 +209,5 @@ struct socket_info *
 skynet_socket_info() {
 	return socket_server_info(SOCKET_SERVER);
 }
+
+// 上面接口都是供应用层调用的}
