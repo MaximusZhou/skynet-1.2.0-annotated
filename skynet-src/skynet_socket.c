@@ -40,7 +40,7 @@ skynet_socket_updatetime() {
 	socket_server_updatetime(SOCKET_SERVER, skynet_now());
 }
 
-// socket线程调用，把收到的数据或者消息放到消息队列中
+// socket线程调用，把收到的数据或者处理请求的结果放到服务对应的次级消息队列中
 // mainloop thread
 static void
 forward_message(int type, bool padding, struct socket_message * result) {
@@ -48,6 +48,7 @@ forward_message(int type, bool padding, struct socket_message * result) {
 	size_t sz = sizeof(*sm);
 	if (padding) {
 		if (result->data) {
+			// 处理超过指定长度的数据，直接截断
 			size_t msg_sz = strlen(result->data);
 			if (msg_sz > 128) {
 				msg_sz = 128;
@@ -63,6 +64,7 @@ forward_message(int type, bool padding, struct socket_message * result) {
 	sm->ud = result->ud;
 	if (padding) {
 		sm->buffer = NULL;
+		// 拷贝数据到sm中
 		memcpy(sm+1, result->data, sz - sizeof(*sm));
 	} else {
 		sm->buffer = result->data;
@@ -93,6 +95,8 @@ skynet_socket_poll() {
 	switch (type) {
 	case SOCKET_EXIT:
 		return 0;
+	// 其中类型 SKYNET_SOCKET_TYPE_DATA SKYNET_SOCKET_TYPE_CONNECT 等类型是返回给worker线程做区分的
+	// 比如 gate 服务中接口 dispatch_socket_message(service_gate.c) 根据不同的类型做不同的处理
 	case SOCKET_DATA:
 		forward_message(SKYNET_SOCKET_TYPE_DATA, false, &result);
 		break;
@@ -125,6 +129,7 @@ skynet_socket_poll() {
 }
 
 // { 下面接口都是供应用层调用的，通常worker线程调用，比如gate服务中
+
 int
 skynet_socket_send(struct skynet_context *ctx, int id, void *buffer, int sz) {
 	return socket_server_send(SOCKET_SERVER, id, buffer, sz);

@@ -12,7 +12,7 @@
 #define PTYPE_CLIENT 3
 #define PTYPE_SYSTEM 4
 #define PTYPE_HARBOR 5
-#define PTYPE_SOCKET 6
+#define PTYPE_SOCKET 6 // socket线程向消息队列push的消息都是这种类型
 // read lualib/skynet.lua examples/simplemonitor.lua
 #define PTYPE_ERROR 7	
 // read lualib/skynet.lua lualib/mqueue.lua lualib/snax.lua
