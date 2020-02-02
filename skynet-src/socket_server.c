@@ -56,7 +56,7 @@
 #define AGAIN_WOULDBLOCK EAGAIN
 #endif
 
-#define WARNING_SIZE (1024*1024)
+#define WARNING_SIZE (1024*1024) // 等待发送的数据初次报警的数值，后面都是上一次数值*2
 
 struct write_buffer {
 	struct write_buffer * next;
@@ -97,9 +97,9 @@ struct socket {
 	uint8_t protocol;
 	uint8_t type; // socket 当前状态类型，初始值为 SOCKET_TYPE_INVALID
 	uint16_t udpconnecting;
-	int64_t warn_size;
+	int64_t warn_size; // 累计等待要发送的数据量，报警的数值
 	union {
-		int size;
+		int size; // 保存下次从网络上读数据最大的大小
 		uint8_t udp_address[UDP_ADDRESS_SIZE];
 	} p;
 	struct spinlock dw_lock;
@@ -119,14 +119,16 @@ struct socket_server {
 	int alloc_id; // 初始值为0，一直递增的，用来给新的套接字在slot数组中找一个空的位置
 	int event_n; // 初始值为0
 	int event_index; // 初始化值为0
-	struct socket_object_interface soi;
-	struct event ev[MAX_EVENT]; // 保存当前可读写的事件信息
+	struct socket_object_interface soi; // 用来接管send_object的生成，即接口send_object_init中使用
+	struct event ev[MAX_EVENT]; // 保存当前可读写的事件信息，即保存epoll_wait的结果
 	struct socket slot[MAX_SOCKET]; // 保存所有套接字
-	char buffer[MAX_INFO];
+	// 用来暂时保存一些数据，比如在connect和accept的时候，保存对方的ip地址和端口信息
+	char buffer[MAX_INFO]; 
 	uint8_t udpbuffer[MAX_UDP_PACKAGE];
 	fd_set rfds;
 };
 
+// { worker线程向socket线程发送请求，请求数据的使用结构体，不用的请求用不同的结构体封装
 struct request_open {
 	int id;
 	int port;
@@ -223,6 +225,8 @@ struct request_package {
 	uint8_t dummy[256];
 };
 
+// worker线程向socket线程发送请求结构体}
+
 union sockaddr_all {
 	struct sockaddr s;
 	struct sockaddr_in v4;
@@ -241,7 +245,7 @@ struct send_object {
 #define FREE skynet_free
 
 struct socket_lock {
-	struct spinlock *lock; // 指向sokcet对应的锁，即结构体socket字段dw_lock
+	struct spinlock *lock; // 指向socket对应的锁，即结构体socket字段dw_lock
 	int count;
 };
 
@@ -278,6 +282,7 @@ socket_unlock(struct socket_lock *sl) {
 	}
 }
 
+// 把要发送的数据信息，都统一转换到结构体send_object中
 static inline bool
 send_object_init(struct socket_server *ss, struct send_object *so, void *object, int sz) {
 	if (sz < 0) {
@@ -309,7 +314,8 @@ socket_keepalive(int fd) {
 	setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, (void *)&keepalive , sizeof(keepalive));  
 }
 
-// 给一个链接，生成一个id，方便在slot中查到
+// 从管理所有的套接字结构体socket的slot找一个空的位置，并且返回相应的id
+// 通过id，可以获得空结构体在slot中的位置
 static int
 reserve_id(struct socket_server *ss) {
 	int i;
@@ -344,7 +350,7 @@ clear_wb_list(struct wb_list *list) {
 	list->tail = NULL;
 }
 
-// 服务器启动时候在主线程调用，创建管理 socket 相关的结构体 socket_server
+// 在主线程中调用，服务器启动时候调用，创建管理 socket 相关的结构体 socket_server
 struct socket_server * 
 socket_server_create(uint64_t time) {
 	int i;
@@ -357,8 +363,9 @@ socket_server_create(uint64_t time) {
 		return NULL;
 	}
 
-	// pipe创建一个管道，用于进程间通信，返回两个fd，pipefd[0]用于读，pipefd[1]用于写
+	// pipe创建一个管道，用于线程间通信，返回两个fd，pipefd[0]用于读，pipefd[1]用于写
 	// 写入到管道数据，在读取之前，都是被 Linux 内核 buffed 的
+	// 这里是用于worker线程和socket线程通信
 	if (pipe(fd)) {
 		// sp_release 只是对 close 简单封装
 		sp_release(efd);
@@ -408,6 +415,7 @@ socket_server_updatetime(struct socket_server *ss, uint64_t time) {
 	ss->time = time;
 }
 
+// 释放buff list对应的内存，包括对应数据分配的内存
 static void
 free_wb_list(struct socket_server *ss, struct wb_list *list) {
 	struct write_buffer *wb = list->head;
@@ -763,7 +771,7 @@ send_buffer_empty(struct socket *s) {
 	3. If low list head is uncomplete (send a part before), move the head of low list to empty high list (call raise_uncomplete) .
 	4. If two lists are both empty, turn off the event. (call check_close)
  */
-// @socket线程
+// @socket线程 如果有剩余数据没有发送完成，这时候也会返回-1
 static int
 send_buffer_(struct socket_server *ss, struct socket *s, struct socket_lock *l, struct socket_message *result) {
 	assert(!list_uncomplete(&s->low));
@@ -811,7 +819,7 @@ send_buffer_(struct socket_server *ss, struct socket *s, struct socket_lock *l, 
 	return -1;
 }
 
-// @socket线程
+// @socket线程 发送buff中数据到网络上
 static int
 send_buffer(struct socket_server *ss, struct socket *s, struct socket_lock *l, struct socket_message *result) {
 	if (!socket_trylock(l))
@@ -1284,6 +1292,7 @@ ctrl_cmd(struct socket_server *ss, struct socket_message *result) {
 	return -1;
 }
 
+// @socket线程 从套接字中读取数据，并把读取的数据放到result，然后给worker线程使用
 // return -1 (ignore) when error
 static int
 forward_message_tcp(struct socket_server *ss, struct socket *s, struct socket_lock *l, struct socket_message * result) {
@@ -1308,6 +1317,7 @@ forward_message_tcp(struct socket_server *ss, struct socket *s, struct socket_lo
 	}
 	if (n==0) {
 		FREE(buffer);
+		// 
 		force_close(ss, s, l, result);
 		return SOCKET_CLOSE;
 	}
@@ -1320,6 +1330,7 @@ forward_message_tcp(struct socket_server *ss, struct socket *s, struct socket_lo
 
 	stat_read(ss,s,n);
 
+	// 动态调整每次从网络上最多读取的数据大小
 	if (n == sz) {
 		s->p.size *= 2;
 	} else if (sz > MIN_READ_BUFFER && n*2 < sz) {
@@ -1393,6 +1404,10 @@ forward_message_udp(struct socket_server *ss, struct socket *s, struct socket_lo
 	return SOCKET_UDP;
 }
 
+// @socket线程 当前请求连接的连接成功时候，调用这个接口，其工作是把套接字状态
+// SOCKET_TYPE_CONNECTING --> SOCKET_TYPE_CONNECTED
+// 此时设置套接字结构体相关的信息，比如对方的ip地址
+// 构造result，用来通知worker线程connet成功了
 static int
 report_connect(struct socket_server *ss, struct socket *s, struct socket_lock *l, struct socket_message *result) {
 	int error;
@@ -1427,6 +1442,7 @@ report_connect(struct socket_server *ss, struct socket *s, struct socket_lock *l
 	}
 }
 
+// 把相应的ip地址和端口号以字符串的形式写入buffer中
 static int
 getname(union sockaddr_all *u, char *buffer, size_t sz) {
 	char tmp[INET6_ADDRSTRLEN];
@@ -1441,7 +1457,8 @@ getname(union sockaddr_all *u, char *buffer, size_t sz) {
 	}
 }
 
-// 接收新的链接
+// @socket线程 监听的套接字收到新的连接时候，调用这个接口，其主要工作是：
+// 调用accept接收先的连接，然后调用new_fd创建对应的保存套接字信息结构体socket
 // return 0 when failed, or -1 when file limit
 static int
 report_accept(struct socket_server *ss, struct socket *s, struct socket_message *result) {
@@ -1511,9 +1528,11 @@ int
 socket_server_poll(struct socket_server *ss, struct socket_message * result, int * more) {
 	for (;;) {
 		// 处理来自woker线程的请求，从pipe中读取
+		// 优先处理来自woker线程的请求，处理完成后，在跑后面的逻辑
 		if (ss->checkctrl) {
 			if (has_cmd(ss)) {
-				// 检查是否有worker线程请求，若有，则处理
+				// 检查是否有worker线程请求，若有，则处理，并且只处理一个请求，然后返回
+				// 再下一次调用的时候再处理
 				int type = ctrl_cmd(ss, result);
 				if (type != -1) {
 					clear_closed_event(ss, result, type);
@@ -1521,12 +1540,16 @@ socket_server_poll(struct socket_server *ss, struct socket_message * result, int
 				} else
 					continue;
 			} else {
+				// 处理所有来自worker线程请求后，设置标识，下面循环处理网络上的读写事件
+				// 即下面的逻辑
 				ss->checkctrl = 0;
 			}
 		}
 
+		// 等待网络上的读写事件
 		if (ss->event_index == ss->event_n) {
-			// 所有的事件处理完后，调用epoll_wait等待相应的事件到来
+			// 初始的时候，或者所有的事件处理完后，调用epoll_wait等待相应的事件到来
+			// sp_wait返回的值，为epoll_wait的返回值，即触发事件的数量
 			ss->event_n = sp_wait(ss->event_fd, ss->ev, MAX_EVENT);
 			ss->checkctrl = 1;
 			if (more) {
@@ -1535,7 +1558,7 @@ socket_server_poll(struct socket_server *ss, struct socket_message * result, int
 			ss->event_index = 0;
 			if (ss->event_n <= 0) {
 				ss->event_n = 0;
-				// epoll_wait 被信号中断了
+				// epoll_wait 被信号中断了，重新epoll_wait
 				if (errno == EINTR) {
 					continue;
 				}
@@ -1543,19 +1566,23 @@ socket_server_poll(struct socket_server *ss, struct socket_message * result, int
 			}
 		}
 
-		// 处理每一个可读写的事件
+		// 开始处理每一个可读写的事件，每次socket_server_poll调用只处理一个事件
 		struct event *e = &ss->ev[ss->event_index++];
 		struct socket *s = e->s;
 		if (s == NULL) {
 			// dispatch pipe message at beginning
+			// 因为在socket_server_create中，把recvctrl_fd 也加入到poll event监听了
+			// 加入监听的原因，防止没有网络相关的事件，但是有worker线程的请求，这时候也不能阻塞的
 			continue;
 		}
 		struct socket_lock l;
 		socket_lock_init(s, &l);
 		switch (s->type) {
 		case SOCKET_TYPE_CONNECTING:
+			// 正在等待连接的套接字，等到可写的事件了，表示连接成功了
 			return report_connect(ss, s, &l, result);
 		case SOCKET_TYPE_LISTEN: {
+			// 监听的套接字，收到新的连接调用
 			int ok = report_accept(ss, s, result);
 			if (ok > 0) {
 				return SOCKET_ACCEPT;
@@ -1570,6 +1597,7 @@ socket_server_poll(struct socket_server *ss, struct socket_message * result, int
 			break;
 		default:
 			if (e->read) {
+				// 有数据可读
 				int type;
 				if (s->protocol == PROTOCOL_TCP) {
 					type = forward_message_tcp(ss, s, &l, result);
@@ -1583,6 +1611,7 @@ socket_server_poll(struct socket_server *ss, struct socket_message * result, int
 				}
 				if (e->write && type != SOCKET_CLOSE && type != SOCKET_ERR) {
 					// Try to dispatch write message next step if write flag set.
+					// 本事件不仅有读事件，还有写事件，则下次调用还需要这个event，即处理它的写事件
 					e->read = false;
 					--ss->event_index;
 				}
@@ -1598,6 +1627,7 @@ socket_server_poll(struct socket_server *ss, struct socket_message * result, int
 			}
 			if (e->error) {
 				// close when error
+				// 处理错误，把错误信息返会给worker线程，同时close相应的套接字
 				int error;
 				socklen_t len = sizeof(error);  
 				int code = getsockopt(s->fd, SOL_SOCKET, SO_ERROR, &error, &len);  
@@ -1776,7 +1806,7 @@ socket_server_exit(struct socket_server *ss) {
 	send_request(ss, &request, 'X', 0);
 }
 
-// @worker线程
+// @worker线程，情况socket线程关闭连接，不强制关闭
 void
 socket_server_close(struct socket_server *ss, uintptr_t opaque, int id) {
 	struct request_package request;
@@ -1786,7 +1816,7 @@ socket_server_close(struct socket_server *ss, uintptr_t opaque, int id) {
 	send_request(ss, &request, 'K', sizeof(request.u.close));
 }
 
-
+// @worker线程，强求socket线程关闭连接，强制关闭
 void
 socket_server_shutdown(struct socket_server *ss, uintptr_t opaque, int id) {
 	struct request_package request;
