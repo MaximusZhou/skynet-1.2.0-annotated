@@ -1,6 +1,10 @@
+-- 该脚本在lualib/loader.lua中最后一行代码处加载执行
+--
 local skynet = require "skynet" -- 即对应模块lualib/skynet.lua
-local harbor = require "skynet.harbor"
-require "skynet.manager"	-- import skynet.launch, ...
+local harbor = require "skynet.harbor" -- 即对应模块 lualib/skynet/harbor.lua
+require "skynet.manager"	-- import skynet.launch, ...-- 即对应模块 lualib/skynet/manager.lua
+
+ -- 对应模块为lualib-src/lua-memory.c，调用接口luaopen_skynet_memory
 local memory = require "skynet.memory"
 
 skynet.start(function()

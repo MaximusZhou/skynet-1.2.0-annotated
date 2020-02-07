@@ -21,6 +21,7 @@ struct snlua {
 };
 
 // LUA_CACHELIB may defined in patched lua for shared proto
+// 当前宏是有定义的，在3rd/lua/lualib.h
 #ifdef LUA_CACHELIB
 
 #define codecache luaopen_cache
@@ -64,6 +65,7 @@ report_launcher_error(struct skynet_context *ctx) {
 	skynet_sendname(ctx, 0, ".launcher", PTYPE_TEXT, 0, "ERROR", 5);
 }
 
+// 返回对应的配置
 static const char *
 optstring(struct skynet_context *ctx, const char *key, const char * str) {
 	const char * ret = skynet_command(ctx, "GETENV", key);
@@ -73,6 +75,7 @@ optstring(struct skynet_context *ctx, const char *key, const char * str) {
 	return ret;
 }
 
+// 处理snlua服务第一条消息的相应逻辑，即用来初始化snlua服务
 static int
 init_cb(struct snlua *l, struct skynet_context *ctx, const char * args, size_t sz) {
 	lua_State *L = l->L;
@@ -82,13 +85,14 @@ init_cb(struct snlua *l, struct skynet_context *ctx, const char * args, size_t s
 	lua_setfield(L, LUA_REGISTRYINDEX, "LUA_NOENV");
 	luaL_openlibs(L);
 
-	// 设置全局变量skynet_context
+	// 设置全局变量skynet_context，为snlua服务
 	lua_pushlightuserdata(L, ctx);
 	lua_setfield(L, LUA_REGISTRYINDEX, "skynet_context");
 
 	luaL_requiref(L, "skynet.codecache", codecache , 0);
 	lua_pop(L,1);
 
+	// 通过配置文件，设置lua 虚拟机相应的全局变量
 	const char *path = optstring(ctx, "lua_path","./lualib/?.lua;./lualib/?/init.lua");
 	lua_pushstring(L, path);
 	lua_setglobal(L, "LUA_PATH");
@@ -110,9 +114,13 @@ init_cb(struct snlua *l, struct skynet_context *ctx, const char * args, size_t s
 	int r = luaL_loadfile(L,loader);
 	if (r != LUA_OK) {
 		skynet_error(ctx, "Can't load %s : %s", loader, lua_tostring(L, -1));
+		// BUG: 下面这行代码不对，因为这时候launcher服务还没有启动起来的
+		// 在执行完，下面的lua_pcall成功后，launcher服务才启动起来的
 		report_launcher_error(ctx);
 		return 1;
 	}
+
+	// 执行脚本lualib/loader.lua
 	lua_pushlstring(L, args, sz);
 	r = lua_pcall(L,1,0,1);
 	if (r != LUA_OK) {
@@ -121,6 +129,8 @@ init_cb(struct snlua *l, struct skynet_context *ctx, const char * args, size_t s
 		return 1;
 	}
 	lua_settop(L,0);
+
+	// 有设置的话，设置一个snlua服务对应的lua虚拟机能分配的内存上限
 	if (lua_getfield(L, LUA_REGISTRYINDEX, "memlimit") == LUA_TNUMBER) {
 		size_t limit = lua_tointeger(L, -1);
 		l->mem_limit = limit;
@@ -136,6 +146,7 @@ init_cb(struct snlua *l, struct skynet_context *ctx, const char * args, size_t s
 }
 
 // 第一条消息的回调函数
+// 这里的msg就是bootstrap
 static int
 launch_cb(struct skynet_context * context, void *ud, int type, int session, uint32_t source , const void * msg, size_t sz) {
 	assert(type == 0 && session == 0);
@@ -158,9 +169,12 @@ snlua_init(struct snlua *l, struct skynet_context *ctx, const char * args) {
 	memcpy(tmp, args, sz);
 	// 设置服务的回调函数为 launch_cb
 	skynet_callback(ctx, l , launch_cb);
-	const char * self = skynet_command(ctx, "REG", NULL);
+	// snlua服务没有专门的名字，即名字格式为:%x，通过名字获取到相应的handle
+	// 按理这个地方可以直接调用接口skynet_context_handle的
+	const char * self = skynet_command(ctx, "REG", NULL); 
 	uint32_t handle_id = strtoul(self+1, NULL, 16);
 	// it must be first message
+	// 给自己发送一条消息，内容即为bootstrap
 	skynet_send(ctx, 0, handle_id, PTYPE_TAG_DONTCOPY,0, tmp, sz);
 	return 0;
 }
