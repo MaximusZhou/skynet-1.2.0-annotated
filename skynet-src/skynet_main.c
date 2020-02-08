@@ -49,6 +49,7 @@ optstring(const char *key,const char * opt) {
 	return str;
 }
 
+// 通过调用接口skynet_setenv 把配置文件的中配置，各个变量设置为相应环境L的全局变量
 static void
 _init_env(lua_State *L) {
 	lua_pushnil(L);  /* first key */
@@ -147,6 +148,7 @@ main(int argc, char *argv[]) {
 	assert(err == LUA_OK);
 	lua_pushstring(L, config_file);
 
+	// 配置文件的变量作为L中的全局变量被加载
 	err = lua_pcall(L, 1, 1, 0);
 	if (err) {
 		fprintf(stderr,"%s\n",lua_tostring(L,-1));

@@ -82,6 +82,7 @@ skynet_handle_register(struct skynet_context *ctx) {
 }
 
 // 把 handle 对应的 ctx 和相应名字从管理模块中删除 
+// 并且调用skynet_context_release释放服务分配的相应内存
 int
 skynet_handle_retire(uint32_t handle) {
 	int ret = 0;

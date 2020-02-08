@@ -10,7 +10,10 @@
 
 struct skynet_env {
 	struct spinlock lock;
-	lua_State *L;
+
+	// 用来保存配置文件信息，对应的lua_State，所有的配置以全局变量方式保存在这个lua_State中
+	// 相应的value值都是为字符串，如果bool型，对应为"true" 或 "false"
+	lua_State *L; 
 };
 
 static struct skynet_env *E = NULL;

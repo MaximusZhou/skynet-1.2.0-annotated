@@ -97,6 +97,7 @@ skynet_current_handle(void) {
 	}
 }
 
+// 把整数id转换为":xxx"，就xxx是对应十六进制数值
 static void
 id_to_hex(char * str, uint32_t id) {
 	int i;
@@ -410,6 +411,7 @@ skynet_queryname(struct skynet_context * context, const char * name) {
 	return 0;
 }
 
+// 服务自己主动退出销毁退出调用的逻辑
 static void
 handle_exit(struct skynet_context * context, uint32_t handle) {
 	if (handle == 0) {
@@ -431,6 +433,8 @@ struct command_func {
 	const char * (*func)(struct skynet_context * context, const char * param);
 };
 
+// 脚本层命令 "TIMEOUT" 最后对应执行的逻辑
+// 返回一个本次调用唯一的标识，即session
 static const char *
 cmd_timeout(struct skynet_context * context, const char * param) {
 	char * session_ptr = NULL;
@@ -517,6 +521,7 @@ cmd_kill(struct skynet_context * context, const char * param) {
 	return NULL;
 }
 
+// 实现脚本层使用的LAUNCH命令，启动一个新的服务，返回相应的服务handle对应的十六进制值的字符串
 static const char *
 cmd_launch(struct skynet_context * context, const char * param) {
 	size_t sz = strlen(param);
@@ -700,7 +705,8 @@ static struct command_func cmd_funcs[] = {
 	{ NULL, NULL },
 };
 
-// 执行 cmd 相应的函数
+// 供各类服务调用（比如在service_snlua.c中调用），方便执行相应的操作
+// 执行 cmd 相应的函数，返回相应的值
 const char * 
 skynet_command(struct skynet_context * context, const char * cmd , const char * param) {
 	struct command_func * method = &cmd_funcs[0];
