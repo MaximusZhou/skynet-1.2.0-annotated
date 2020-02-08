@@ -76,6 +76,7 @@ optstring(struct skynet_context *ctx, const char *key, const char * str) {
 }
 
 // 处理snlua服务第一条消息的相应逻辑，即用来初始化snlua服务
+// 这里args就是比如bootstrap、launcher等字符串
 static int
 init_cb(struct snlua *l, struct skynet_context *ctx, const char * args, size_t sz) {
 	lua_State *L = l->L;
@@ -146,7 +147,7 @@ init_cb(struct snlua *l, struct skynet_context *ctx, const char * args, size_t s
 }
 
 // 第一条消息的回调函数
-// 这里的msg就是bootstrap
+// 这里的msg就是bootstrap、launcher等服务启动的时候参数
 static int
 launch_cb(struct skynet_context * context, void *ud, int type, int session, uint32_t source , const void * msg, size_t sz) {
 	assert(type == 0 && session == 0);

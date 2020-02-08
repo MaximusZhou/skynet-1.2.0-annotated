@@ -52,6 +52,7 @@ traceback (lua_State *L) {
 	return 1;
 }
 
+// snlua服务对应C回调的函数，只是简单封装，为了方便调用真正的lua回调函数
 static int
 _cb(struct skynet_context * context, void * ud, int type, int session, uint32_t source, const void * msg, size_t sz) {
 	lua_State *L = ud;
@@ -105,6 +106,7 @@ forward_cb(struct skynet_context * context, void * ud, int type, int session, ui
 	return 1;
 }
 
+// 供脚本成使用，比如c.callback(skynet.dispatch_message)，设置服务的回调函数
 static int
 lcallback(lua_State *L) {
 	struct skynet_context * context = lua_touserdata(L, lua_upvalueindex(1));
@@ -125,6 +127,7 @@ lcallback(lua_State *L) {
 	return 0;
 }
 
+// 执行服务命令，参数和返回值都是字符串的类型
 static int
 lcommand(lua_State *L) {
 	struct skynet_context * context = lua_touserdata(L, lua_upvalueindex(1));
@@ -175,6 +178,8 @@ laddresscommand(lua_State *L) {
 	return 0;
 }
 
+// 执行脚本层通知要执行的命令，比如c.intcommand("TIMEOUT", ti)最后调用就是这个接口
+// 参数可以为整数和字符串，返回值是整型
 static int
 lintcommand(lua_State *L) {
 	struct skynet_context * context = lua_touserdata(L, lua_upvalueindex(1));
@@ -229,6 +234,7 @@ get_dest_string(lua_State *L, int index) {
 	return dest_string;
 }
 
+// 给相应的服务发送消息
 static int
 send_message(lua_State *L, int source, int idx_type) {
 	struct skynet_context * context = lua_touserdata(L, lua_upvalueindex(1));
@@ -300,6 +306,7 @@ send_message(lua_State *L, int source, int idx_type) {
 	 lightuserdata message_ptr
 	 integer len
  */
+// 给相应的服务发送消息
 static int
 lsend(lua_State *L) {
 	return send_message(L, 0, 2);

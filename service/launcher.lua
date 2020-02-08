@@ -1,3 +1,4 @@
+-- 该服务可以看做是用来管理所有其他的lua服务，其他lua服务的创建和删除都是告知launcher服务
 local skynet = require "skynet"
 local core = require "skynet.core"
 require "skynet.manager"	-- import manager apis
@@ -92,6 +93,8 @@ local function launch_service(service, ...)
 	return inst
 end
 
+-- 启动一个服务
+-- skynet.call(".launcher", "lua" , "LAUNCH", "snlua", name, ...) 调用最后执行的逻辑
 function command.LAUNCH(_, service, ...)
 	launch_service(service, ...)
 	return NORET
@@ -155,6 +158,7 @@ skynet.register_protocol {
 	end,
 }
 
+-- 注册"lua"类型的协议，对应的响应函数
 skynet.dispatch("lua", function(session, address, cmd , ...)
 	cmd = string.upper(cmd)
 	local f = command[cmd]

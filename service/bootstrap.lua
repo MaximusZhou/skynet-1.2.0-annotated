@@ -13,7 +13,9 @@ skynet.start(function()
 
 	local standalone = skynet.getenv "standalone"
 
+	-- 启动一个新的snlua服务，加载对应的脚本service/launcher.lua
 	local launcher = assert(skynet.launch("snlua","launcher"))
+	-- 给启动的服务设置名字为.launcher
 	skynet.name(".launcher", launcher)
 
 	local harbor_id = tonumber(skynet.getenv "harbor" or 0)
@@ -48,5 +50,6 @@ skynet.start(function()
 	end
 	skynet.newservice "service_mgr"
 	pcall(skynet.newservice,skynet.getenv "start" or "main")
+	-- lua bootstrap 服务退出
 	skynet.exit()
 end)

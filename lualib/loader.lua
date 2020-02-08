@@ -6,15 +6,20 @@ for word in string.gmatch(..., "%S+") do
 end
 
 -- 按config/examples 中配置, SERVICE_NAME值就是 bootstrap
+-- 在脚本中使用skynet.launch("snlua","launcher")调用的时候，这个地方SERVICE_NAME就是launcher
 SERVICE_NAME = args[1]
 
 local main, pattern
 
--- LUA_SERVICE 在examples/config.path配置，默认值就是 service/?.lua
+-- LUA_SERVICE 在examples/config.path配置，默认值就是
+-- ./service/?.lua;./test/?.lua;./examples/?.lua;./test/?/init.lua
+-- 也就是说从目录 service/ test/ examples/ /tes/name/init.lua 找相应的lua服务对应的lua文件
+-- 直到找到为止
 local err = {}
 for pat in string.gmatch(LUA_SERVICE, "([^;]+);*") do
 	local filename = string.gsub(pat, "?", SERVICE_NAME)
-	local f, msg = loadfile(filename) -- 按 config/examples 配置 filename就是 serivce/bootstrap.lua
+	-- 按 config/examples 配置 对于bootstrap服务，这里的filename就是 比如serivce/bootstrap.lua
+	local f, msg = loadfile(filename) 
 	if not f then
 		table.insert(err, msg)
 	else
@@ -25,12 +30,12 @@ for pat in string.gmatch(LUA_SERVICE, "([^;]+);*") do
 end
 
 -- 按 config/examples 配置，到这里 pattern 就是 service/?.lua，
--- main就是 serivce/bootstrap.lua loadfile返回的结果
+-- main就是 比如serivce/bootstrap.lua loadfile返回的结果
 if not main then
 	error(table.concat(err, "\n"))
 end
 
--- 下面都是准备环境，为执行serivce/bootstrap.lua做准备
+-- 下面都是准备环境，为执行比如serivce/bootstrap.lua做准备
 LUA_SERVICE = nil
 -- 把 LUA_PATH 的值赋值给package.path，同时赋值 LUA_PATH 为nil
 -- 上面执行后，按examples/config.pat配置
@@ -58,5 +63,5 @@ if LUA_PRELOAD then
 	LUA_PRELOAD = nil
 end
 
--- 执行service/bootstrap.lua
+-- 比如执行service/bootstrap.lua
 main(select(2, table.unpack(args)))

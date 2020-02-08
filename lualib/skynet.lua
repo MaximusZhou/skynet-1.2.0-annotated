@@ -198,6 +198,7 @@ function suspend(co, result, command)
 	end
 end
 
+-- 脚本层设置定时器，ti 超时时间，相应回调函数
 function skynet.timeout(ti, func)
 	local session = c.intcommand("TIMEOUT",ti)
 	assert(session)
@@ -291,6 +292,7 @@ function skynet.time()
 	return skynet.now()/100 + (starttime or skynet.starttime())
 end
 
+-- lua 服务主动退出，调用和执行的逻辑接口
 function skynet.exit()
 	fork_queue = {}	-- no fork coroutine can be execute after skynet.exit
 	skynet.send(".launcher","lua","REMOVE",skynet.self(), false)
@@ -359,6 +361,9 @@ local function yield_call(service, session)
 	return msg,sz
 end
 
+-- 调用对应服务的接口
+-- addr 服务对应的名字
+-- typename 是协议对应的类型名字
 function skynet.call(addr, typename, ...)
 	local tag = session_coroutine_tracetag[running_thread]
 	if tag then
@@ -485,6 +490,7 @@ function skynet.wakeup(token)
 	end
 end
 
+-- 设置协议的响应函数，其中typename就是协议的类型名字，也可以协议的标识 
 function skynet.dispatch(typename, func)
 	local p = proto[typename]
 	if func then
@@ -533,9 +539,12 @@ end
 
 local trace_source = {}
 
+-- snlua服务处理消息，最后真正调用到的脚本函数
+-- 根据不同的类型进行分发
 local function raw_dispatch_message(prototype, msg, sz, session, source)
 	-- skynet.PTYPE_RESPONSE = 1, read skynet.h
 	if prototype == 1 then
+		-- 脚本层注册的timeout也是走这个分支
 		local co = session_id_coroutine[session]
 		if co == "BREAK" then
 			session_id_coroutine[session] = nil
@@ -595,6 +604,7 @@ local function raw_dispatch_message(prototype, msg, sz, session, source)
 	end
 end
 
+-- snlua服务处理消息，调用到的脚本函数
 function skynet.dispatch_message(...)
 	local succ, err = pcall(raw_dispatch_message,...)
 	while true do
@@ -659,6 +669,11 @@ function skynet.traceproto(prototype, flag)
 	p.trace = flag
 end
 
+-- 服务器一启动就注册协议的类型
+-- 在skynet.call调用的时候，通常就是使用注册的字段name来区分不同的协议类型，
+-- 然后不同服务对不同的协议，有不同的响应函数去处理，
+-- 通过调用接口skynet.dispatch来设置不同协议响应函数，比如
+-- skynet.call(".launcher", "lua" , "LAUNCH", "snlua", name, ...)
 ----- register protocol
 do
 	local REG = skynet.register_protocol
@@ -735,8 +750,10 @@ function skynet.init_service(start)
 	end
 end
 
+-- lua服务启动调用skynet.start()，对应触发的接口
+-- 设置当前 snlua 服务的回调函数为  skynet.dispatch_message
+-- 调用函数start_func，即lua服务启动时候，调用的函数
 function skynet.start(start_func)
-	-- 设置当前 snlua 服务的回调函数为  skynet.dispatch_message
 	c.callback(skynet.dispatch_message)
 	init_thread = skynet.timeout(0, function()
 		skynet.init_service(start_func)

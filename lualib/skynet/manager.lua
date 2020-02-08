@@ -1,8 +1,13 @@
 local skynet = require "skynet"
 local c = require "skynet.core"
 
+-- lua层接口，启动一个服务
+-- 返回相应服务handle
 function skynet.launch(...)
-	local addr = c.command("LAUNCH", table.concat({...}," "))
+
+	-- c.command执行路径是lcommand(lualib-src/lua-skynet.c) ->
+	-- skynet_command(skynet-src/skynet_server.c)
+	local addr = c.command("LAUNCH", table.concat({...}," ")) 
 	if addr then
 		return tonumber("0x" .. string.sub(addr , 2))
 	end
