@@ -1,5 +1,5 @@
 local skynet = require "skynet"
-local socket = require "skynet.socket"
+local socket = require "skynet.socket" -- lualib/skynet/socket.lua
 
 --[[
 	master manage data :
@@ -29,6 +29,7 @@ local slave_node = {}
 local global_name = {}
 
 local function read_package(fd)
+	-- socket.read如果数据读取，则会协程阻塞等待
 	local sz = socket.read(fd, 1)
 	assert(sz, "closed")
 	sz = string.byte(sz)
@@ -46,12 +47,14 @@ end
 local function report_slave(fd, slave_id, slave_addr)
 	local message = pack_package("C", slave_id, slave_addr)
 	local n = 0
+	-- 给其他的slave，广播新的slave加入
 	for k,v in pairs(slave_node) do
 		if v.fd ~= 0 then
 			socket.write(v.fd, message)
 			n = n + 1
 		end
 	end
+	-- 通知刚加入的slave
 	socket.write(fd, pack_package("W", n))
 end
 
@@ -94,6 +97,8 @@ local function dispatch_slave(fd)
 	end
 end
 
+-- 该接口在dispatch_message中被调用，即fork_queue队列中resume
+-- 每个slave跟master的连接对应一个协程调用这个接口
 local function monitor_slave(slave_id, slave_address)
 	local fd = slave_node[slave_id].fd
 	skynet.error(string.format("Harbor %d (fd=%d) report %s", slave_id, fd, slave_address))
@@ -112,6 +117,9 @@ skynet.start(function()
 	skynet.error("master listen socket " .. tostring(master_addr))
 	local fd = socket.listen(master_addr)
 	socket.start(fd , function(id, addr)
+		-- 这个函数在接收到一个新的连接被调用
+		-- 参数新连接的fd，和对方的地址
+		-- 这里等待slave的连接
 		skynet.error("connect from " .. addr .. " " .. id)
 		socket.start(id)
 		local ok, slave, slave_addr = pcall(handshake, id)

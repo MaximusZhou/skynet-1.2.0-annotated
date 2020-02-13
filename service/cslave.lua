@@ -112,6 +112,8 @@ local function monitor_master(master_fd)
 	end
 end
 
+-- slave收到一个新的连接
+-- 每个连接都第一个协议来调用这个接口
 local function accept_slave(fd)
 	socket.start(fd)
 	local id = socket.read(fd, 1)
@@ -239,6 +241,7 @@ skynet.start(function()
 	end)
 	skynet.dispatch("text", monitor_harbor(master_fd))
 
+	-- 开启一个harbor服务 service-src/service_harbor.c
 	harbor_service = assert(skynet.launch("harbor", harbor_id, skynet.self()))
 
 	local hs_message = pack_package("H", harbor_id, slave_address)

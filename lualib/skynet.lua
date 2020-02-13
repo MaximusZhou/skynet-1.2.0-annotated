@@ -9,6 +9,7 @@ local pairs = pairs
 local pcall = pcall
 local table = table
 
+-- lualib-src/lua-profile.c
 local profile = require "skynet.profile"
 
 local cresume = profile.resume
@@ -106,11 +107,14 @@ end
 
 local coroutine_pool = setmetatable({}, { __mode = "kv" })
 
+-- 使用函数f创建一个协程，并返回
 local function co_create(f)
 	local co = table.remove(coroutine_pool)
 	if co == nil then
 		co = coroutine_create(function(...)
 			f(...)
+
+			-- 实质消息处理函数已经完成了，下面都是为了协议复用处理的逻辑
 			while true do
 				local session = session_coroutine_id[co]
 				if session and session ~= 0 then
@@ -135,13 +139,16 @@ local function co_create(f)
 				f = nil
 				coroutine_pool[#coroutine_pool+1] = co
 				-- recv new main function f
+				-- 参数SUSPEND作为coroutine_resume的返回值，然后这个返回值作为参数调用suspend
 				f = coroutine_yield "SUSPEND"
+				-- 执行复用的协程函数，其中coroutine_yield返回值，即coroutine_resume中传入的参数
 				f(coroutine_yield())
 			end
 		end)
 	else
 		-- pass the main function f to coroutine, and restore running thread
 		local running = running_thread
+		-- 唤醒复用的协程
 		coroutine_resume(co, f)
 		running_thread = running
 	end
@@ -353,6 +360,8 @@ skynet.trash = assert(c.trash)
 local function yield_call(service, session)
 	watching_session[session] = service
 	session_id_coroutine[session] = running_thread
+	-- 协程在这个地方等待，等待其他消息回复的时候，将其resume
+	-- 其中SUSPEND作为cresume时候的返回值，即函数suspend的参数
 	local succ, msg, sz = coroutine_yield "SUSPEND"
 	watching_session[session] = nil
 	if not succ then
@@ -364,6 +373,7 @@ end
 -- 调用对应服务的接口
 -- addr 服务对应的名字
 -- typename 是协议对应的类型名字
+-- 并且挂起相应的协程，等待对应的的服务返回，再往下执行
 function skynet.call(addr, typename, ...)
 	local tag = session_coroutine_tracetag[running_thread]
 	if tag then
@@ -524,6 +534,7 @@ function skynet.dispatch_unknown_response(unknown)
 	return prev
 end
 
+--这里的fork的意思，是创建一个协程，即在一个线程里面创建其他的协程做一些其他事情
 function skynet.fork(func,...)
 	local n = select("#", ...)
 	local co
@@ -543,6 +554,7 @@ local trace_source = {}
 -- 根据不同的类型进行分发
 local function raw_dispatch_message(prototype, msg, sz, session, source)
 	-- skynet.PTYPE_RESPONSE = 1, read skynet.h
+	-- call其他服务的接口，其他服务回的消息类型就是PTYPE_RESPONSE，走的就是这个分支
 	if prototype == 1 then
 		-- 脚本层注册的timeout也是走这个分支
 		local co = session_id_coroutine[session]
@@ -554,6 +566,7 @@ local function raw_dispatch_message(prototype, msg, sz, session, source)
 			local tag = session_coroutine_tracetag[co]
 			if tag then c.trace(tag, "resume") end
 			session_id_coroutine[session] = nil
+			-- 这里的true,msg和sz就是coroutine_yield返回的值
 			suspend(co, coroutine_resume(co, true, msg, sz))
 		end
 	else
@@ -570,8 +583,9 @@ local function raw_dispatch_message(prototype, msg, sz, session, source)
 			return
 		end
 
-		local f = p.dispatch
+		local f = p.dispatch -- 获取相应消息处理函数
 		if f then
+			-- 为了消息处理函数创建一个协程
 			local co = co_create(f)
 			session_coroutine_id[co] = session
 			session_coroutine_address[co] = source
@@ -592,6 +606,7 @@ local function raw_dispatch_message(prototype, msg, sz, session, source)
 					skynet.trace()
 				end
 			end
+			-- coroutine_resume 即执行处理消息对应的协程
 			suspend(co, coroutine_resume(co, session,source, p.unpack(msg,sz)))
 		else
 			trace_source[source] = nil

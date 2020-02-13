@@ -244,7 +244,7 @@ start(int thread) {
 	free_monitor(m);
 }
 
-// 创建 snlua 对应的 ctx，参数为bootstrap，即有配置文件bootstrap来确定name 和 args
+// 创建snlua对应的ctx，参数为bootstrap，即有配置文件bootstrap来确定name和args
 static void
 bootstrap(struct skynet_context * logger, const char * cmdline) {
 	int sz = strlen(cmdline);

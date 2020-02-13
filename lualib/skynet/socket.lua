@@ -1,4 +1,4 @@
-local driver = require "skynet.socketdriver"
+local driver = require "skynet.socketdriver" -- lualib-src/lua-socket.c
 local skynet = require "skynet"
 local skynet_core = require "skynet.core"
 local assert = assert
@@ -29,8 +29,8 @@ end
 
 local function suspend(s)
 	assert(not s.co)
-	s.co = coroutine.running()
-	skynet.wait(s.co)
+	s.co = coroutine.running() --返回正在运行的coroutine
+	skynet.wait(s.co) -- 协程挂起等待
 	-- wakeup closing corouting every time suspend,
 	-- because socket.close() will wait last socket buffer operation before clear the buffer.
 	if s.closing then
@@ -204,6 +204,7 @@ function socket.stdin()
 	return socket.bind(0)
 end
 
+-- 如果id是监听的套接字，func是连接建立成功后，相应的回调函数
 function socket.start(id, func)
 	driver.start(id)
 	return connect(id, func)
@@ -282,7 +283,8 @@ function socket.read(id, sz)
 
 	assert(not s.read_required)
 	s.read_required = sz
-	suspend(s)
+	suspend(s) -- 等待数据
+	-- 下面表示有数据，则直接读取
 	ret = driver.pop(s.buffer, buffer_pool, sz)
 	if ret then
 		return ret
