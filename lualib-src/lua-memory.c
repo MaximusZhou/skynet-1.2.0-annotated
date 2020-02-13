@@ -1,3 +1,4 @@
+// 该模块中接口获取skynet-src/malloc_hook.c中内存分配相关的信息，提供相关接口供lua层使用
 #define LUA_LIB
 
 #include <lua.h>
