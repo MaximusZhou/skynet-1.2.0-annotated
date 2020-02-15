@@ -334,6 +334,9 @@ pushstring(lua_State *L, const char * msg, int size) {
 		integer fd
 		string msg | lightuserdata/integer
  */
+
+// 用来处理接口forward_message()放到次级消息队列中的消息
+// 当前用于gate服务，在lualib/snax/gateserver.lua中用来解包socket类型的消息
 static int
 lfilter(lua_State *L) {
 	struct skynet_socket_message *message = lua_touserdata(L,2);

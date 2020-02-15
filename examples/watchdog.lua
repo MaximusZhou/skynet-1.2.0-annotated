@@ -39,6 +39,7 @@ end
 function SOCKET.data(fd, msg)
 end
 
+-- 开启监听
 function CMD.start(conf)
 	skynet.call(gate, "lua", "open" , conf)
 end

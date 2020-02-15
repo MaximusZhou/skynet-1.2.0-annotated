@@ -1,6 +1,6 @@
 local skynet = require "skynet"
 local netpack = require "skynet.netpack"
-local socketdriver = require "skynet.socketdriver"
+local socketdriver = require "skynet.socketdriver" -- lualib-src/lua-socket.c
 
 local gateserver = {}
 
@@ -88,6 +88,7 @@ function gateserver.start(handler)
 		end
 		connection[fd] = true
 		client_number = client_number + 1
+		-- 调用的是service/gate.lua中的connect接口
 		handler.connect(fd, msg)
 	end
 

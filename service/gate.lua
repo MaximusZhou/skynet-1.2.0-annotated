@@ -1,5 +1,5 @@
 local skynet = require "skynet"
-local gateserver = require "snax.gateserver"
+local gateserver = require "snax.gateserver" -- lualib/snax/gateserver.lua
 
 local watchdog
 local connection = {}	-- fd -> connection : { fd , client, agent , ip, mode }
@@ -95,4 +95,7 @@ function handler.command(cmd, source, ...)
 	return f(source, ...)
 end
 
+-- 调用lualib/snax/gateserver.lua中start接口，来开启服务
+-- 这个接口主要工作增加通用的处理逻辑，即放在全局变量CMD中，以及调用skynet.start,
+-- 设置lua类型的消息的dispatch函数
 gateserver.start(handler)

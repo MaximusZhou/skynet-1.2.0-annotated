@@ -5,7 +5,7 @@ if _VERSION ~= "Lua 5.3" then
 	error "Use lua 5.3"
 end
 
-local socket = require "client.socket"
+local socket = require "client.socket" -- lualib-src/lua-clientsocket.c
 local proto = require "proto"
 local sproto = require "sproto"
 

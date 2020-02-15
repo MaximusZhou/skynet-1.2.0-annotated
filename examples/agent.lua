@@ -1,5 +1,5 @@
 local skynet = require "skynet"
-local socket = require "skynet.socket"
+local socket = require "skynet.socket" -- lualib/skynet/socket.c
 local sproto = require "sproto"
 local sprotoloader = require "sprotoloader"
 
