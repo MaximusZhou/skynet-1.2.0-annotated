@@ -86,7 +86,7 @@ struct socket_stat {
 };
 
 struct socket {
-	uintptr_t opaque;
+	uintptr_t opaque;     // 与本socket关联的服务handle
 	struct wb_list high; // 用于保存高优先级数据的 write_buffer list
 	struct wb_list low; // 用于保存低优先级数据的 write_buffer list
 	int64_t wb_size; // 保存所有要发送的数据字节数，包括high和low字段所有的数据
@@ -94,8 +94,8 @@ struct socket {
 	volatile uint32_t sending; // 这个字段的第三个字节和第四个字节值与id一样，低的两个字节初始值为0
 	int fd;
 	int id; // 通过HASH_ID(id)，可以获得在数组slot中的下标
-	uint8_t protocol;
-	uint8_t type; // socket 当前状态类型，初始值为 SOCKET_TYPE_INVALID
+	uint8_t protocol; // 使用的协议，值为PROTOCOL_TCP等类型
+	uint8_t type; // socket 当前状态类型，初始值为SOCKET_TYPE_INVALID，epoll事件触发时，会根据type来选择处理事件的逻辑
 	uint16_t udpconnecting;
 	int64_t warn_size; // 累计等待要发送的数据量，报警的数值
 	union {
@@ -117,8 +117,8 @@ struct socket_server {
 	int checkctrl; // 用于表示是否检查处理命令行相关数据，初始值为1
 	poll_fd event_fd; // epoll 对应的 fd
 	int alloc_id; // 初始值为0，一直递增的，用来给新的套接字在slot数组中找一个空的位置
-	int event_n; // 初始值为0
-	int event_index; // 初始化值为0
+	int event_n; // 初始值为0,标记本次epoll事件的数量
+	int event_index; // 初始化为0，下一个未处理的epoll事件索引
 	struct socket_object_interface soi; // 用来接管send_object的生成，即接口send_object_init中使用
 	struct event ev[MAX_EVENT]; // 保存当前可读写的事件信息，即保存epoll_wait的结果
 	struct socket slot[MAX_SOCKET]; // 保存所有套接字
